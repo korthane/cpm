@@ -79,6 +79,14 @@ func TestParseMCPListVariedLines(t *testing.T) {
 			in:   "tricky: cmd --flag - value - ✔ Connected\n",
 			want: []MCPServer{{Name: "tricky", Target: "cmd --flag - value"}},
 		},
+		{
+			// Cut on the first ": " splits at the name's own separator,
+			// truncating the name and folding the remainder into the
+			// target. Pinned as documented behavior, not a bug to fix.
+			name: "name containing the separator is truncated",
+			in:   "weird: name: cmd - ✔ Connected\n",
+			want: []MCPServer{{Name: "weird", Target: "name: cmd"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

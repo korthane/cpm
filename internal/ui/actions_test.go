@@ -182,6 +182,9 @@ func TestActionFailureSurfacesErrorAndKeepsState(t *testing.T) {
 	m := modelWithCells(t, runner, installedFoo(true))
 
 	m, cmd := press(t, m, "u")
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
 	updated, refresh := m.Update(cmd())
 	got := updated.(Model)
 

@@ -4,7 +4,9 @@ package claudecli
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -55,5 +57,26 @@ func TestRealRunnerTimeoutKillsGrandchildren(t *testing.T) {
 			t.Fatalf("grandchild %d still alive after the timeout kill", pid)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestSetProcessGroupCancelMapsESRCHToProcessDone(t *testing.T) {
+	// Regression test for the race where the process group exits on its own
+	// between the deadline firing and Cancel's kill signal: syscall.Kill then
+	// returns ESRCH, which must map to os.ErrProcessDone rather than a raw
+	// error, or os/exec reports a successful run as failed.
+	stub := writeScript(t, "#!/bin/sh\nexit 0\n")
+	cmd := exec.CommandContext(t.Context(), stub)
+	setProcessGroup(cmd)
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	if err := cmd.Cancel(); !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("Cancel() after natural exit = %v, want os.ErrProcessDone", err)
 	}
 }

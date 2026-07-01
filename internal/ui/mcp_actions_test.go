@@ -250,6 +250,9 @@ func TestMCPRemoveFailureSurfacesErrorAndKeepsState(t *testing.T) {
 
 	m, _ = press(t, m, "x")
 	m, cmd := press(t, m, "y")
+	if cmd == nil {
+		t.Fatal("expected command")
+	}
 	updated, refresh := m.Update(cmd())
 	got := updated.(Model)
 
