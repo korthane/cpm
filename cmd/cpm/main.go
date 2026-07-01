@@ -72,9 +72,15 @@ func resolveProfiles(cliArgs []string) ([]config.Profile, error) {
 		if err != nil {
 			return nil, err
 		}
-		discovered, err = config.AutoDiscover(home)
-		if err != nil {
-			return nil, err
+		// Skip auto-discover once config profiles exist: ResolveProfiles would
+		// ignore discovered profiles anyway, and a valid config shouldn't fail
+		// due to an unrelated auto-discover error (e.g. a $HOME containing
+		// glob metacharacters that make filepath.Glob return ErrBadPattern).
+		if len(cfg.Profiles) == 0 {
+			discovered, err = config.AutoDiscover(home)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
