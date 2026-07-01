@@ -171,12 +171,12 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
 - [x] run tests + lint — must pass before Task 4
 
 ### Task 4: Auth-status loader (per profile)
-- [ ] add `LoadAuthStatus(ctx, Runner, profileDir) (AuthStatus, error)` parsing
+- [x] add `LoadAuthStatus(ctx, Runner, profileDir) (AuthStatus, error)` parsing
       `auth status --json` → `{Email, SubscriptionType, LoggedIn}`
-- [ ] handle logged-out / malformed / missing-fields gracefully (no crash;
+- [x] handle logged-out / malformed / missing-fields gracefully (no crash;
       degrade to blank email/plan)
-- [ ] write tests with golden fixture (success) and error/edge fixtures
-- [ ] run tests + lint — must pass before Task 5
+- [x] write tests with golden fixture (success) and error/edge fixtures
+- [x] run tests + lint — must pass before Task 5
 
 ### Task 5: Plugin data loader (per profile)
 - [ ] capture real `plugin list --available --json` output into
