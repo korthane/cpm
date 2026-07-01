@@ -148,15 +148,15 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
 - [x] run tests + `golangci-lint` — must pass before Task 2
 
 ### Task 2: Command runner abstraction (`claudecli.Runner`)
-- [ ] define `Runner` interface `Run(ctx, profileDir string, args ...string)
+- [x] define `Runner` interface `Run(ctx, profileDir string, args ...string)
       ([]byte, error)` and a `realRunner` using `os/exec` that sets
       `CLAUDE_CONFIG_DIR`
-- [ ] implement a `fakeRunner` (test helper) keyed by args → canned
+- [x] implement a `fakeRunner` (test helper) keyed by args → canned
       stdout/error, recording invocations
-- [ ] write tests: real runner builds correct env/args (use `echo`-style stub or
+- [x] write tests: real runner builds correct env/args (use `echo`-style stub or
       a script); fake runner returns canned output and records calls
-- [ ] write tests: non-zero exit / stderr is surfaced as an error
-- [ ] run tests + lint — must pass before Task 3
+- [x] write tests: non-zero exit / stderr is surfaced as an error
+- [x] run tests + lint — must pass before Task 3
 
 ### Task 3: Profile discovery with precedence
 - [ ] implement config-file load (`~/.config/cpm/config.yaml`, optional) →
