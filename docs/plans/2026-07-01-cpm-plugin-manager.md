@@ -212,15 +212,20 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   are per profile), refining the plan's parameterless signature
 
 ### Task 7: Aggregate plugins into a comparison matrix
-- [ ] implement `BuildPluginMatrix(profiles, perProfilePluginData, latestVersions)`
+- [x] implement `BuildPluginMatrix(profiles, perProfilePluginData, latestVersions)`
       → rows keyed by `name@marketplace`, each with a cell per profile
       (`{State: Installed|Disabled|Absent, Version}`) and a `LatestVersion`
-- [ ] sort rows (by marketplace, then name); compute per-cell `Outdated` flag vs
+- [x] sort rows (by marketplace, then name); compute per-cell `Outdated` flag vs
       latest
-- [ ] write tests: union of plugins across profiles; disabled vs installed vs
+- [x] write tests: union of plugins across profiles; disabled vs installed vs
       absent cells; outdated detection; deterministic ordering
-- [ ] write tests: single-profile and all-absent edge cases
-- [ ] run tests + lint — must pass before Task 8
+- [x] write tests: single-profile and all-absent edge cases
+- [x] run tests + lint — must pass before Task 8
+- ➕ discovered: the profiles param is redundant — cells align 1:1 with the
+  `perProfile` slice order, so the signature is
+  `BuildPluginMatrix(perProfile []PluginData, latest map[PluginID]string)`;
+  `Outdated` uses numeric segment-wise version compare (only strictly-older
+  flags, `v` prefix ignored) so `1.9.0 < 1.10.0` and `1.5.5 == v1.5.5`
 
 ### Task 8: Bubble Tea app skeleton — tabs + async parallel loading
 - [ ] root model with tab state (`Plugins` | `MCP`), profile list, and per-profile
