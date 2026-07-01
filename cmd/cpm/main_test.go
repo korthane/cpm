@@ -1,49 +1,44 @@
 package main
 
 import (
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestInitReturnsNoCmd(t *testing.T) {
-	if cmd := newModel().Init(); cmd != nil {
-		t.Fatalf("Init() = %v, want nil", cmd)
+func TestResolveProfilesFromArgs(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	profiles, err := resolveProfiles([]string{"/tmp/p1", "/tmp/p2"})
+	if err != nil {
+		t.Fatalf("resolveProfiles: %v", err)
+	}
+	if len(profiles) != 2 || profiles[0].Path != "/tmp/p1" || profiles[1].Path != "/tmp/p2" {
+		t.Fatalf("profiles = %+v, want /tmp/p1 and /tmp/p2", profiles)
 	}
 }
 
-func TestViewRendersPlaceholder(t *testing.T) {
-	view := newModel().View()
-	if !strings.Contains(view, "CPM") {
-		t.Fatalf("View() = %q, want it to mention CPM", view)
+func TestResolveProfilesAutoDiscovers(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".claude")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	profiles, err := resolveProfiles(nil)
+	if err != nil {
+		t.Fatalf("resolveProfiles: %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].Path != dir {
+		t.Fatalf("profiles = %+v, want just %s", profiles, dir)
 	}
 }
 
-func TestUpdateQuitKeys(t *testing.T) {
-	for _, key := range []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune{'q'}},
-		{Type: tea.KeyCtrlC},
-	} {
-		if _, cmd := newModel().Update(key); !isQuit(t, cmd) {
-			t.Errorf("Update(%v) did not return tea.Quit", key)
-		}
-	}
-}
+func TestResolveProfilesErrorsWhenNoneFound(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 
-func TestUpdateIgnoresOtherKeys(t *testing.T) {
-	if _, cmd := newModel().Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}); cmd != nil {
-		t.Fatalf("Update(x) returned a command, want nil")
+	if _, err := resolveProfiles(nil); err == nil {
+		t.Fatal("resolveProfiles with empty home returned no error")
 	}
-}
-
-// isQuit reports whether cmd is tea.Quit by invoking it and inspecting the
-// message; tea.Quit returns a tea.QuitMsg.
-func isQuit(t *testing.T, cmd tea.Cmd) bool {
-	t.Helper()
-	if cmd == nil {
-		return false
-	}
-	_, ok := cmd().(tea.QuitMsg)
-	return ok
 }

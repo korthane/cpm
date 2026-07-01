@@ -3,37 +3,54 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/korthane/cpm/internal/claudecli"
+	"github.com/korthane/cpm/internal/config"
+	"github.com/korthane/cpm/internal/ui"
 )
 
 func main() {
-	if _, err := tea.NewProgram(newModel()).Run(); err != nil {
+	profiles, err := resolveProfiles(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cpm:", err)
+		os.Exit(1)
+	}
+
+	m := ui.New(claudecli.NewRunner(), profiles)
+	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "cpm:", err)
 		os.Exit(1)
 	}
 }
 
-// model is the root Bubble Tea model. For now it renders a placeholder and
-// quits on q / ctrl+c; the real table UI is built in later tasks.
-type model struct{}
-
-func newModel() model { return model{} }
-
-func (m model) Init() tea.Cmd { return nil }
-
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.String() {
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		}
+// resolveProfiles applies the discovery precedence (CLI args > config file >
+// auto-discover) and fails when no profile can be found.
+func resolveProfiles(cliArgs []string) ([]config.Profile, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home dir: %w", err)
 	}
-	return m, nil
-}
 
-func (m model) View() string {
-	return "CPM — Claude Plugin Manager\n\npress q to quit\n"
+	cfg, err := config.LoadConfig(filepath.Join(home, ".config", "cpm", "config.yaml"))
+	if err != nil {
+		return nil, err
+	}
+
+	discovered, err := config.AutoDiscover(home)
+	if err != nil {
+		return nil, err
+	}
+
+	profiles := config.ResolveProfiles(cliArgs, cfg, discovered, home)
+	if len(profiles) == 0 {
+		return nil, errors.New("no profiles found: pass directories as arguments " +
+			"or configure ~/.config/cpm/config.yaml")
+	}
+	return profiles, nil
 }

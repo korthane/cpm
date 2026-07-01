@@ -228,16 +228,20 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   flags, `v` prefix ignored) so `1.9.0 < 1.10.0` and `1.5.5 == v1.5.5`
 
 ### Task 8: Bubble Tea app skeleton — tabs + async parallel loading
-- [ ] root model with tab state (`Plugins` | `MCP`), profile list, and per-profile
+- [x] root model with tab state (`Plugins` | `MCP`), profile list, and per-profile
       load status (`loading|loaded|error`)
-- [ ] `Init` fans out one load `tea.Cmd` **per profile** (parallel); define
+- [x] `Init` fans out one load `tea.Cmd` **per profile** (parallel); define
       `profileLoadedMsg`, `profileErrMsg`, and a `spinner.TickMsg` per column
-- [ ] on all messages, update only the affected profile's slice of state
-- [ ] key handling: tab switch, `q`/`ctrl+c` quit, `r` reload
-- [ ] write tests (teatest / direct `Update`): initial state fires N load cmds;
+- [x] on all messages, update only the affected profile's slice of state
+- [x] key handling: tab switch, `q`/`ctrl+c` quit, `r` reload
+- [x] write tests (teatest / direct `Update`): initial state fires N load cmds;
       each `profileLoadedMsg` flips that column loaded; error → error state
-- [ ] write tests: tab switch changes active view; `r` re-triggers loads
-- [ ] run tests + lint — must pass before Task 9
+- [x] write tests: tab switch changes active view; `r` re-triggers loads
+- [x] run tests + lint — must pass before Task 9
+- ➕ discovered: `cmd/cpm/main.go` now wires profile resolution (CLI args >
+  `~/.config/cpm/config.yaml` > auto-discover) into `ui.New`; a per-column
+  load failure sets only that column's error state, and an auth-status failure
+  degrades to a blank header instead of failing the column
 
 ### Task 9: Plugin table view — pinned column, headers, horizontal scroll
 - [ ] render header row: per profile show `label / path`, `email`, `plan`; pinned
