@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,6 +94,74 @@ func TestInitLoadCarriesProfileData(t *testing.T) {
 		return
 	}
 	t.Fatal("no profileLoadedMsg produced")
+}
+
+func TestLoadRefreshesMarketplacesBeforeCatalogRead(t *testing.T) {
+	runner := okRunner()
+	m := New(runner, testProfiles[:1])
+	drain(t, m.Init())
+
+	joined := make([]string, len(runner.Calls))
+	for i, c := range runner.Calls {
+		joined[i] = strings.Join(c.Args, " ")
+	}
+	if len(joined) == 0 || joined[0] != "plugin marketplace update" {
+		t.Fatalf("calls = %v, want marketplace update first", joined)
+	}
+	if !slices.Contains(joined, "plugin list --available --json") {
+		t.Fatalf("calls = %v, want a plugin list after the refresh", joined)
+	}
+}
+
+func TestLoadCarriesFreshLatestVersions(t *testing.T) {
+	runner := okRunner()
+	runner.Responses["plugin list --available --json"] = claudecli.FakeResponse{
+		Stdout: []byte(`{
+			"installed": [{"id": "foo@mp", "version": "1.0.0", "enabled": true}],
+			"available": [{"pluginId": "foo@mp", "version": "1.2.0", "source": "./foo"}]
+		}`),
+	}
+	m := New(runner, testProfiles[:1])
+
+	for _, msg := range drain(t, m.Init()) {
+		loaded, ok := msg.(profileLoadedMsg)
+		if !ok {
+			continue
+		}
+		if loaded.latest.Stale {
+			t.Error("latest.Stale = true, want false")
+		}
+		pid := claudecli.PluginID{Name: "foo", Marketplace: "mp"}
+		if v := loaded.latest.Versions[pid]; v != "1.2.0" {
+			t.Errorf("latest[foo@mp] = %q, want 1.2.0", v)
+		}
+		return
+	}
+	t.Fatal("no profileLoadedMsg produced")
+}
+
+func TestStaleRefreshFlaggedInPinnedHeader(t *testing.T) {
+	fresh := New(okRunner(), testProfiles[:1])
+	for _, msg := range drain(t, fresh.Init()) {
+		updated, _ := fresh.Update(msg)
+		fresh = updated.(Model)
+	}
+	if strings.Contains(fresh.View(), "(stale)") {
+		t.Error("fresh load shows the stale marker")
+	}
+
+	runner := okRunner()
+	runner.Responses["plugin marketplace update"] = claudecli.FakeResponse{
+		Err: errors.New("marketplace source unreachable"),
+	}
+	stale := New(runner, testProfiles[:1])
+	for _, msg := range drain(t, stale.Init()) {
+		updated, _ := stale.Update(msg)
+		stale = updated.(Model)
+	}
+	if !strings.Contains(stale.View(), "latest (stale)") {
+		t.Errorf("refresh failure not flagged in pinned header:\n%s", stale.View())
+	}
 }
 
 func TestLoadErrorProducesErrMsg(t *testing.T) {

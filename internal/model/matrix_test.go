@@ -167,18 +167,17 @@ func TestBuildPluginMatrixEmptyInput(t *testing.T) {
 	}
 }
 
-func TestLatestVersionsUnionAcrossProfiles(t *testing.T) {
-	perProfile := []claudecli.PluginData{
-		{Available: []claudecli.AvailablePlugin{
-			{ID: id("a", "m"), LatestVersion: "1.0.0"},
-		}},
-		{Available: []claudecli.AvailablePlugin{
-			{ID: id("b", "m"), LatestVersion: "2.0.0"},
-		}},
+func TestMergeLatestVersionsUnionAcrossProfiles(t *testing.T) {
+	perProfile := []claudecli.LatestVersions{
+		{Versions: map[claudecli.PluginID]string{id("a", "m"): "1.0.0"}},
+		{Versions: map[claudecli.PluginID]string{id("b", "m"): "2.0.0"}},
 	}
 
-	got := LatestVersions(perProfile)
+	got, stale := MergeLatestVersions(perProfile)
 
+	if stale {
+		t.Error("stale = true, want false when no profile is stale")
+	}
 	want := map[claudecli.PluginID]string{
 		id("a", "m"): "1.0.0",
 		id("b", "m"): "2.0.0",
@@ -193,43 +192,46 @@ func TestLatestVersionsUnionAcrossProfiles(t *testing.T) {
 	}
 }
 
-func TestLatestVersionsNewestWinsOnDisagreement(t *testing.T) {
+func TestMergeLatestVersionsNewestWinsOnDisagreement(t *testing.T) {
 	// Profiles refresh their catalogs at different times, so the same plugin
 	// can carry different latest versions; the newest one wins either way
 	// round, including numeric (not lexical) segment ordering.
-	perProfile := []claudecli.PluginData{
-		{Available: []claudecli.AvailablePlugin{
-			{ID: id("p", "m"), LatestVersion: "1.10.0"},
-		}},
-		{Available: []claudecli.AvailablePlugin{
-			{ID: id("p", "m"), LatestVersion: "1.9.0"},
-		}},
+	perProfile := []claudecli.LatestVersions{
+		{Versions: map[claudecli.PluginID]string{id("p", "m"): "1.10.0"}},
+		{Versions: map[claudecli.PluginID]string{id("p", "m"): "1.9.0"}},
 	}
 
-	if got := LatestVersions(perProfile)[id("p", "m")]; got != "1.10.0" {
-		t.Errorf("latest = %q, want 1.10.0", got)
+	if got, _ := MergeLatestVersions(perProfile); got[id("p", "m")] != "1.10.0" {
+		t.Errorf("latest = %q, want 1.10.0", got[id("p", "m")])
 	}
 
 	slices.Reverse(perProfile)
-	if got := LatestVersions(perProfile)[id("p", "m")]; got != "1.10.0" {
-		t.Errorf("latest after reverse = %q, want 1.10.0", got)
+	if got, _ := MergeLatestVersions(perProfile); got[id("p", "m")] != "1.10.0" {
+		t.Errorf("latest after reverse = %q, want 1.10.0", got[id("p", "m")])
 	}
 }
 
-func TestLatestVersionsIgnoresEmpty(t *testing.T) {
-	perProfile := []claudecli.PluginData{
-		{Available: []claudecli.AvailablePlugin{
-			{ID: id("p", "m"), LatestVersion: "1.0.0"},
-		}},
-		{Available: []claudecli.AvailablePlugin{
-			{ID: id("p", "m"), LatestVersion: ""},
-		}},
+func TestMergeLatestVersionsIgnoresEmpty(t *testing.T) {
+	perProfile := []claudecli.LatestVersions{
+		{Versions: map[claudecli.PluginID]string{id("p", "m"): "1.0.0"}},
+		{Versions: map[claudecli.PluginID]string{id("p", "m"): ""}},
 	}
 
-	if got := LatestVersions(perProfile)[id("p", "m")]; got != "1.0.0" {
-		t.Errorf("latest = %q, want 1.0.0 (empty must not overwrite)", got)
+	if got, _ := MergeLatestVersions(perProfile); got[id("p", "m")] != "1.0.0" {
+		t.Errorf("latest = %q, want 1.0.0 (empty must not overwrite)", got[id("p", "m")])
 	}
-	if got := LatestVersions(nil); len(got) != 0 {
-		t.Errorf("LatestVersions(nil) = %v, want empty", got)
+	if got, _ := MergeLatestVersions(nil); len(got) != 0 {
+		t.Errorf("MergeLatestVersions(nil) = %v, want empty", got)
+	}
+}
+
+func TestMergeLatestVersionsStaleWhenAnyProfileStale(t *testing.T) {
+	perProfile := []claudecli.LatestVersions{
+		{Versions: map[claudecli.PluginID]string{id("p", "m"): "1.0.0"}},
+		{Stale: true},
+	}
+
+	if _, stale := MergeLatestVersions(perProfile); !stale {
+		t.Error("stale = false, want true when one profile's refresh failed")
 	}
 }

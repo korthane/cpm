@@ -50,6 +50,15 @@ func ListMarketplaces(ctx context.Context, r Runner, profileDir string) ([]Marke
 // usable version (branch refs, bare urls) are filled from each marketplace's
 // <installLocation>/.claude-plugin/marketplace.json, also best-effort.
 func ResolveLatestVersions(ctx context.Context, r Runner, profileDir string) (LatestVersions, error) {
+	_, lv, err := LoadPluginsFresh(ctx, r, profileDir)
+	return lv, err
+}
+
+// LoadPluginsFresh refreshes the profile's marketplaces and then loads its
+// plugin data, so the returned latest versions are resolved from the fresh
+// catalog with a single `plugin list` spawn. Refresh failure does not fail
+// the load: the cached catalog is used and Stale is set.
+func LoadPluginsFresh(ctx context.Context, r Runner, profileDir string) (PluginData, LatestVersions, error) {
 	lv := LatestVersions{Versions: map[PluginID]string{}}
 	if err := RefreshMarketplaces(ctx, r, profileDir); err != nil {
 		lv.Stale = true
@@ -57,7 +66,7 @@ func ResolveLatestVersions(ctx context.Context, r Runner, profileDir string) (La
 
 	data, err := LoadPlugins(ctx, r, profileDir)
 	if err != nil {
-		return LatestVersions{}, err
+		return PluginData{}, LatestVersions{}, err
 	}
 
 	unresolved := false
@@ -70,7 +79,7 @@ func ResolveLatestVersions(ctx context.Context, r Runner, profileDir string) (La
 	if unresolved {
 		fillFromCatalogFiles(ctx, r, profileDir, lv.Versions)
 	}
-	return lv, nil
+	return data, lv, nil
 }
 
 // fillFromCatalogFiles fills empty entries of versions from the on-disk

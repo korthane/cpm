@@ -317,14 +317,24 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   stay ignored there, and the MCP tab's key help shows only `x: remove`
 
 ### Task 13: Verify acceptance criteria
-- [ ] verify all Overview requirements are implemented (two tabs, per-profile
+- [x] verify all Overview requirements are implemented (two tabs, per-profile
       headers with email+plan, pinned latest-version column, horizontal scroll,
       parallel non-blocking load with per-column spinners, plugin actions, MCP
       view+remove)
-- [ ] verify edge cases: single profile, logged-out profile, marketplace refresh
+- [x] verify edge cases: single profile, logged-out profile, marketplace refresh
       failure (stale flag), plugin `version:"unknown"`
-- [ ] run full unit suite; run `golangci-lint` — all issues fixed
-- [ ] verify coverage meets project standard (80%+ on non-UI packages)
+- [x] run full unit suite; run `golangci-lint` — all issues fixed
+- [x] verify coverage meets project standard (80%+ on non-UI packages)
+- ➕ discovered: the audit found the one gap left open by Task 9's note — the
+  pinned latest versions still came from the cached `--available` union, not
+  the fresh resolver. Closed it: profile loads now go through a new
+  `claudecli.LoadPluginsFresh` (marketplace refresh + plugin data + resolved
+  latest versions in one `plugin list` spawn; `ResolveLatestVersions`
+  delegates to it), `model.LatestVersions` is replaced by
+  `model.MergeLatestVersions` over the per-profile resolved maps, and a
+  failed refresh renders the pinned header as `latest (stale)`. Coverage:
+  claudecli 96.3%, config 95.6%, model 98.3% (ui 98.0%; `cmd/cpm` is entry
+  wiring — only untested statements are `main()` itself)
 
 ### Task 14: [Final] Documentation
 - [ ] write `README.md`: what CPM is, install/build, usage (CLI args, config

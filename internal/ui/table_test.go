@@ -50,19 +50,19 @@ func fourProfiles(t *testing.T) Model {
 	resized, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
 	m = resized.(Model)
 
+	pid := claudecli.PluginID{Name: "foo", Marketplace: "mp"}
 	data := claudecli.PluginData{
 		Installed: []claudecli.InstalledPlugin{
-			{ID: claudecli.PluginID{Name: "foo", Marketplace: "mp"}, Version: "1.0.0", Enabled: true},
-		},
-		Available: []claudecli.AvailablePlugin{
-			{ID: claudecli.PluginID{Name: "foo", Marketplace: "mp"}, LatestVersion: "1.2.0"},
+			{ID: pid, Version: "1.0.0", Enabled: true},
 		},
 	}
+	latest := claudecli.LatestVersions{Versions: map[claudecli.PluginID]string{pid: "1.2.0"}}
 	for i := range profiles {
 		loaded, _ := m.Update(profileLoadedMsg{
 			index:   i,
 			auth:    claudecli.AuthStatus{Email: "u@example.com", SubscriptionType: "pro"},
 			plugins: data,
+			latest:  latest,
 		})
 		m = loaded.(Model)
 	}
@@ -176,14 +176,14 @@ func TestBodyCellFormattingInView(t *testing.T) {
 	m = resized.(Model)
 
 	pid := claudecli.PluginID{Name: "foo", Marketplace: "mp"}
-	catalog := []claudecli.AvailablePlugin{{ID: pid, LatestVersion: "1.2.0"}}
+	latest := claudecli.LatestVersions{Versions: map[claudecli.PluginID]string{pid: "1.2.0"}}
 	perProfile := []claudecli.PluginData{
-		{Installed: []claudecli.InstalledPlugin{{ID: pid, Version: "1.0.0", Enabled: true}}, Available: catalog},
-		{Installed: []claudecli.InstalledPlugin{{ID: pid, Version: "1.2.0", Enabled: false}}, Available: catalog},
+		{Installed: []claudecli.InstalledPlugin{{ID: pid, Version: "1.0.0", Enabled: true}}},
+		{Installed: []claudecli.InstalledPlugin{{ID: pid, Version: "1.2.0", Enabled: false}}},
 		{}, // absent
 	}
 	for i, data := range perProfile {
-		loaded, _ := m.Update(profileLoadedMsg{index: i, plugins: data})
+		loaded, _ := m.Update(profileLoadedMsg{index: i, plugins: data, latest: latest})
 		m = loaded.(Model)
 	}
 

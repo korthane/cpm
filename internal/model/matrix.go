@@ -81,23 +81,26 @@ func BuildPluginMatrix(perProfile []claudecli.PluginData, latest map[claudecli.P
 	return rows
 }
 
-// LatestVersions unions the per-profile catalog views into one latest-version
-// map for BuildPluginMatrix. Profiles refresh their catalogs independently, so
-// the same plugin can carry different versions; the newest one wins. Empty
+// MergeLatestVersions unions the per-profile resolved latest versions into
+// one map for BuildPluginMatrix and reports whether any profile's values are
+// stale (its marketplace refresh failed). Profiles refresh independently, so
+// the same plugin can carry different versions; the newest one wins and empty
 // versions never overwrite a known one.
-func LatestVersions(perProfile []claudecli.PluginData) map[claudecli.PluginID]string {
+func MergeLatestVersions(perProfile []claudecli.LatestVersions) (map[claudecli.PluginID]string, bool) {
 	latest := map[claudecli.PluginID]string{}
-	for _, data := range perProfile {
-		for _, a := range data.Available {
-			if a.LatestVersion == "" {
+	stale := false
+	for _, lv := range perProfile {
+		stale = stale || lv.Stale
+		for id, v := range lv.Versions {
+			if v == "" {
 				continue
 			}
-			if cur, ok := latest[a.ID]; !ok || versionLess(cur, a.LatestVersion) {
-				latest[a.ID] = a.LatestVersion
+			if cur, ok := latest[id]; !ok || versionLess(cur, v) {
+				latest[id] = v
 			}
 		}
 	}
-	return latest
+	return latest, stale
 }
 
 // versionLess reports whether version a is strictly older than b. Unknown

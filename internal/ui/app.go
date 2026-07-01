@@ -50,6 +50,9 @@ type column struct {
 	status  loadStatus
 	auth    claudecli.AuthStatus
 	plugins claudecli.PluginData
+	// latest carries the profile's freshly resolved latest versions (its
+	// marketplaces are re-fetched on every load; Stale marks a failed fetch).
+	latest  claudecli.LatestVersions
 	err     error
 	spinner spinner.Model
 	// MCP state loads lazily (mcp list is slow) and independently of the
@@ -115,6 +118,7 @@ type profileLoadedMsg struct {
 	index   int
 	auth    claudecli.AuthStatus
 	plugins claudecli.PluginData
+	latest  claudecli.LatestVersions
 }
 
 // profileErrMsg reports a failed profile load.
@@ -187,14 +191,16 @@ func loadMCPProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
 func loadProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		plugins, err := claudecli.LoadPlugins(ctx, r, profileDir)
+		// The fresh load re-fetches the profile's marketplaces so the pinned
+		// latest versions never come from a stale cache (user requirement).
+		plugins, latest, err := claudecli.LoadPluginsFresh(ctx, r, profileDir)
 		if err != nil {
 			return profileErrMsg{index: index, err: err}
 		}
 		// A failed auth read (e.g. logged-out profile) degrades to a blank
 		// header instead of failing the whole column.
 		auth, _ := claudecli.LoadAuthStatus(ctx, r, profileDir)
-		return profileLoadedMsg{index: index, auth: auth, plugins: plugins}
+		return profileLoadedMsg{index: index, auth: auth, plugins: plugins, latest: latest}
 	}
 }
 
@@ -214,6 +220,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col.status = statusLoaded
 		col.auth = msg.auth
 		col.plugins = msg.plugins
+		col.latest = msg.latest
 		col.err = nil
 		return m, nil
 
@@ -534,19 +541,30 @@ func (m Model) statusLine() string {
 // pluginRows builds the comparison matrix from the currently loaded columns;
 // it backs both the rendered table and action-key validation.
 func (m Model) pluginRows() []model.PluginRow {
+	rows, _ := m.pluginMatrix()
+	return rows
+}
+
+// pluginMatrix merges each column's freshly resolved latest versions into the
+// comparison rows and reports whether any of them are stale (a marketplace
+// refresh failed, so that profile fell back to its cached catalog).
+func (m Model) pluginMatrix() ([]model.PluginRow, bool) {
 	perProfile := make([]claudecli.PluginData, len(m.columns))
+	perLatest := make([]claudecli.LatestVersions, len(m.columns))
 	for i := range m.columns {
 		perProfile[i] = m.columns[i].plugins
+		perLatest[i] = m.columns[i].latest
 	}
-	return model.BuildPluginMatrix(perProfile, model.LatestVersions(perProfile))
+	latest, stale := model.MergeLatestVersions(perLatest)
+	return model.BuildPluginMatrix(perProfile, latest), stale
 }
 
 func (m Model) viewPlugins() string {
-	rows := m.pluginRows()
+	rows, stale := m.pluginMatrix()
 
 	table := comparisonTable{
 		profiles: make([]tableColumn, len(m.columns)),
-		pinned:   pinnedPluginColumn(rows),
+		pinned:   pinnedPluginColumn(rows, stale),
 		sel:      m.selCol,
 		width:    m.width,
 	}
@@ -742,17 +760,23 @@ func formatPluginCell(c model.PluginCell) string {
 
 // pinnedPluginColumn is the identity column: `name@marketplace` plus the
 // latest available version, with the versions left-aligned in a sub-column.
-func pinnedPluginColumn(rows []model.PluginRow) tableColumn {
+// stale marks the versions as possibly outdated (a marketplace refresh
+// failed, so at least one profile fell back to its cached catalog).
+func pinnedPluginColumn(rows []model.PluginRow, stale bool) tableColumn {
 	const title = "plugin@marketplace"
 	idW := lipgloss.Width(title)
 	for _, row := range rows {
 		idW = max(idW, lipgloss.Width(row.ID.String()))
 	}
 
+	latestTitle := "latest"
+	if stale {
+		latestTitle = "latest (stale)"
+	}
 	col := tableColumn{
 		// Two blank lines align the title with the last profile-header line.
 		header: []tableCell{{}, {}, {
-			text:  fmt.Sprintf("%-*s  %s", idW, title, "latest"),
+			text:  fmt.Sprintf("%-*s  %s", idW, title, latestTitle),
 			style: labelStyle,
 		}},
 		cells: make([]tableCell, len(rows)),
