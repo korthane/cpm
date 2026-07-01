@@ -52,6 +52,11 @@ type column struct {
 	plugins claudecli.PluginData
 	err     error
 	spinner spinner.Model
+	// MCP state loads lazily (mcp list is slow) and independently of the
+	// plugin data, so it carries its own status/error pair.
+	mcp       []claudecli.MCPServer
+	mcpStatus loadStatus
+	mcpErr    error
 }
 
 // Model is the root Bubble Tea model: tab state plus one column per profile.
@@ -64,6 +69,9 @@ type Model struct {
 	selRow int
 	selCol int
 	width  int
+	// mcpStarted flips on the first view of the MCP tab: mcp list runs a
+	// health check per server, so it only loads once actually needed.
+	mcpStarted bool
 	// pending is a destructive action awaiting y/n confirmation.
 	pending *pendingAction
 	// status is the transient status/error line; cleared on the next key.
@@ -104,6 +112,18 @@ type profileErrMsg struct {
 	err   error
 }
 
+// mcpLoadedMsg delivers one profile's MCP servers; index addresses the column.
+type mcpLoadedMsg struct {
+	index   int
+	servers []claudecli.MCPServer
+}
+
+// mcpErrMsg reports a failed MCP load for one profile.
+type mcpErrMsg struct {
+	index int
+	err   error
+}
+
 // actionDoneMsg reports a finished plugin action against one profile.
 type actionDoneMsg struct {
 	index  int
@@ -123,6 +143,27 @@ func (m Model) loadAll() tea.Cmd {
 		cmds = append(cmds, m.columns[i].spinner.Tick)
 	}
 	return tea.Batch(cmds...)
+}
+
+// loadMCPAll fans out one MCP load per profile plus the spinner ticks; used
+// on the first view of the MCP tab and on reload.
+func (m Model) loadMCPAll() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, 2*len(m.columns))
+	for i := range m.columns {
+		cmds = append(cmds, loadMCPProfile(m.runner, i, m.columns[i].profile.Path))
+		cmds = append(cmds, m.columns[i].spinner.Tick)
+	}
+	return tea.Batch(cmds...)
+}
+
+func loadMCPProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
+	return func() tea.Msg {
+		servers, err := claudecli.LoadMCP(context.Background(), r, profileDir)
+		if err != nil {
+			return mcpErrMsg{index: index, err: err}
+		}
+		return mcpLoadedMsg{index: index, servers: servers}
+	}
 }
 
 func loadProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
@@ -164,6 +205,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col.err = msg.err
 		return m, nil
 
+	case mcpLoadedMsg:
+		col := &m.columns[msg.index]
+		col.mcpStatus = statusLoaded
+		col.mcp = msg.servers
+		col.mcpErr = nil
+		return m, nil
+
+	case mcpErrMsg:
+		col := &m.columns[msg.index]
+		col.mcpStatus = statusError
+		col.mcpErr = msg.err
+		return m, nil
+
 	case actionDoneMsg:
 		col := &m.columns[msg.index]
 		if msg.err != nil {
@@ -186,7 +240,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// forwarding to loading columns keeps exactly their ticks alive.
 		var cmds []tea.Cmd
 		for i := range m.columns {
-			if m.columns[i].status != statusLoading {
+			if !m.columnLoading(i) {
 				continue
 			}
 			var cmd tea.Cmd
@@ -196,6 +250,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 	return m, nil
+}
+
+// columnLoading reports whether column i still has a load in flight — plugin
+// data, or MCP data once its lazy load has started — keeping its spinner alive.
+func (m Model) columnLoading(i int) bool {
+	return m.columns[i].status == statusLoading ||
+		(m.mcpStarted && m.columns[i].mcpStatus == statusLoading)
 }
 
 func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -208,6 +269,10 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "tab", "shift+tab":
 		m.tab = (m.tab + 1) % tabCount
+		if m.tab == tabMCP && !m.mcpStarted {
+			m.mcpStarted = true
+			return m, m.loadMCPAll()
+		}
 		return m, nil
 	case "left":
 		m.selCol = max(0, m.selCol-1)
@@ -219,9 +284,18 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selRow = max(0, m.selRow-1)
 		return m, nil
 	case "down":
-		m.selRow = min(max(0, len(m.pluginRows())-1), m.selRow+1)
+		m.selRow = min(max(0, m.rowCount()-1), m.selRow+1)
 		return m, nil
 	case "r":
+		// Reload only the active tab's data: the other tab's data stays valid
+		// and MCP reloads are expensive (per-server health checks).
+		if m.tab == tabMCP {
+			for i := range m.columns {
+				m.columns[i].mcpStatus = statusLoading
+				m.columns[i].mcpErr = nil
+			}
+			return m, m.loadMCPAll()
+		}
 		for i := range m.columns {
 			m.columns[i].status = statusLoading
 			m.columns[i].err = nil
@@ -348,7 +422,7 @@ func (m Model) View() string {
 	case tabPlugins:
 		b.WriteString(m.viewPlugins())
 	case tabMCP:
-		b.WriteString("MCP servers — coming in a later task\n")
+		b.WriteString(m.viewMCP())
 	}
 
 	b.WriteString("\n")
@@ -407,6 +481,44 @@ func (m Model) viewPlugins() string {
 	return table.render()
 }
 
+// mcpRows builds the MCP comparison matrix from the currently loaded columns.
+func (m Model) mcpRows() []model.MCPRow {
+	perProfile := make([][]claudecli.MCPServer, len(m.columns))
+	for i := range m.columns {
+		perProfile[i] = m.columns[i].mcp
+	}
+	return model.BuildMCPMatrix(perProfile)
+}
+
+// rowCount is the active tab's number of matrix rows; it bounds the row
+// selection.
+func (m Model) rowCount() int {
+	if m.tab == tabMCP {
+		return len(m.mcpRows())
+	}
+	return len(m.pluginRows())
+}
+
+func (m Model) viewMCP() string {
+	rows := m.mcpRows()
+
+	table := comparisonTable{
+		profiles: make([]tableColumn, len(m.columns)),
+		pinned:   pinnedMCPColumn(rows),
+		sel:      m.selCol,
+		width:    m.width,
+	}
+	selRow := min(m.selRow, len(rows)-1)
+	for i := range m.columns {
+		rowSel := -1
+		if i == m.selCol {
+			rowSel = selRow
+		}
+		table.profiles[i] = m.columns[i].mcpColumn(i, rows, rowSel)
+	}
+	return table.render()
+}
+
 // pluginColumn is this profile's table column: a three-line header
 // (label, path, account or load status) plus one cell per matrix row.
 // selRow marks the selected cell (-1 when the selection is elsewhere).
@@ -431,6 +543,57 @@ func (c *column) pluginColumn(idx int, rows []model.PluginRow, selRow int) table
 		col.cells[i] = cell
 	}
 	return col
+}
+
+// mcpColumn is this profile's MCP-tab column: the same three-line header as
+// the plugins tab (with the MCP load state on the third line) plus one cell
+// per server row. selRow marks the selected cell (-1 when elsewhere).
+func (c *column) mcpColumn(idx int, rows []model.MCPRow, selRow int) tableColumn {
+	labelCell := tableCell{text: c.profile.Label, style: labelStyle}
+	if selRow >= 0 {
+		labelCell.style = labelStyle.Underline(true)
+	}
+	col := tableColumn{
+		header: []tableCell{
+			labelCell,
+			{text: c.profile.Path, style: pathStyle},
+			c.mcpStatusCell(),
+		},
+		cells: make([]tableCell, len(rows)),
+	}
+	for i, row := range rows {
+		cell := c.mcpBodyCell(row.Cells[idx])
+		if i == selRow {
+			cell.style = cell.style.Reverse(true)
+		}
+		col.cells[i] = cell
+	}
+	return col
+}
+
+// mcpStatusCell shows the MCP load state while it is in flight (mcp list is
+// slow), then falls back to the shared account line.
+func (c *column) mcpStatusCell() tableCell {
+	switch c.mcpStatus {
+	case statusLoaded:
+		return c.statusCell()
+	case statusError:
+		return tableCell{text: "error: " + c.mcpErr.Error(), style: errStyle}
+	default:
+		return tableCell{text: c.spinner.View() + " loading…"}
+	}
+}
+
+// mcpBodyCell renders one MCP matrix cell: the server's target when present,
+// `—` when absent; blank until the column's MCP data has arrived.
+func (c *column) mcpBodyCell(cell model.MCPCell) tableCell {
+	if c.mcpStatus != statusLoaded {
+		return tableCell{}
+	}
+	if !cell.Present {
+		return tableCell{text: "—", style: absentStyle}
+	}
+	return tableCell{text: cell.Target}
 }
 
 // statusCell is the third header line: the account while loaded, otherwise
@@ -517,6 +680,19 @@ func pinnedPluginColumn(rows []model.PluginRow) tableColumn {
 	for i, row := range rows {
 		text := fmt.Sprintf("%-*s  %s", idW, row.ID.String(), versionText(row.LatestVersion))
 		col.cells[i] = tableCell{text: strings.TrimRight(text, " ")}
+	}
+	return col
+}
+
+// pinnedMCPColumn is the MCP identity column: the server name.
+func pinnedMCPColumn(rows []model.MCPRow) tableColumn {
+	col := tableColumn{
+		// Two blank lines align the title with the last profile-header line.
+		header: []tableCell{{}, {}, {text: "mcp server", style: labelStyle}},
+		cells:  make([]tableCell, len(rows)),
+	}
+	for i, row := range rows {
+		col.cells[i] = tableCell{text: row.Name}
 	}
 	return col
 }

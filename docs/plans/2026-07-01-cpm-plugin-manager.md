@@ -282,18 +282,25 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   (e.g. `i` only where absent) with a hint on mismatch
 
 ### Task 11: MCP loader + MCP table view
-- [ ] capture real `claude mcp list` text output into `testdata/`; implement a
+- [x] capture real `claude mcp list` text output into `testdata/`; implement a
       **line parser** → `[]MCPServer{Name, Target, Status}` (tolerant of the
       `Checking health…` preamble and varied `- status` suffixes)
-- [ ] add `LoadMCP(ctx, Runner, profileDir)`; wire as an async per-profile load
+- [x] add `LoadMCP(ctx, Runner, profileDir)`; wire as an async per-profile load
       that populates the MCP tab lazily on first view (slow → spinner)
-- [ ] `BuildMCPMatrix` = presence/target per profile, pinned identity column
+- [x] `BuildMCPMatrix` = presence/target per profile, pinned identity column
       (name); reuse the Task 9 table renderer
-- [ ] write tests: parse fixture (multiple servers, health preamble, error line)
+- [x] write tests: parse fixture (multiple servers, health preamble, error line)
       → structs; matrix union across profiles; present vs absent cells
-- [ ] write tests: malformed/empty output handled; renderer shows spinner while
+- [x] write tests: malformed/empty output handled; renderer shows spinner while
       MCP tab loads
-- [ ] run tests + lint — must pass before Task 12
+- [x] run tests + lint — must pass before Task 12
+- ➕ discovered: the parser skips any line without a `name: ` separator, so the
+  health-check preamble, blank lines, and the "No MCP servers configured"
+  message all degrade to zero rows instead of parse errors; server names may
+  themselves contain colons (`plugin:playwright:playwright`) so the split is
+  on the first `: ` and the status on the last ` - `. `r` now reloads only the
+  active tab's data (MCP reloads re-run per-server health checks, so a plugins
+  reload does not pay that cost)
 
 ### Task 12: MCP actions (remove; add deferred)
 - [ ] `x` remove → `claude mcp remove <name>` against selected profile, with
