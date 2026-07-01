@@ -119,13 +119,13 @@ func TestScrollClampsAtBothEnds(t *testing.T) {
 	m := fourProfiles(t)
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	if got := updated.(Model).scroll; got != 0 {
-		t.Errorf("left at offset 0: scroll = %d, want 0", got)
+	if got := updated.(Model).selCol; got != 0 {
+		t.Errorf("left at offset 0: selCol = %d, want 0", got)
 	}
 
 	m = scrollRight(t, m, 10)
-	if m.scroll != 3 {
-		t.Errorf("scroll after 10 rights = %d, want 3 (clamped)", m.scroll)
+	if m.selCol != 3 {
+		t.Errorf("selCol after 10 rights = %d, want 3 (clamped)", m.selCol)
 	}
 }
 

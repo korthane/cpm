@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -23,12 +24,13 @@ type tableColumn struct {
 
 // comparisonTable renders scrollable profile columns plus a pinned identity
 // column. The pinned column is always drawn on the right; the profile columns
-// show a window starting at scroll, with ◀/▶ indicators when columns are
-// hidden. This layout is shared by the plugins and (later) MCP tabs.
+// show the leftmost window that contains the selected column sel, with ◀/▶
+// indicators when columns are hidden. This layout is shared by the plugins
+// and (later) MCP tabs.
 type comparisonTable struct {
 	profiles []tableColumn
 	pinned   tableColumn
-	scroll   int
+	sel      int
 	width    int
 }
 
@@ -61,10 +63,17 @@ func (t comparisonTable) render() string {
 	}
 
 	avail := width - pinnedW - lipgloss.Width(pinnedSeparator) - 2*gutterWidth
-	scroll := min(max(t.scroll, 0), len(t.profiles)-1)
-	visible, used := visibleColumns(widths, scroll, avail)
+	sel := min(max(t.sel, 0), len(t.profiles)-1)
+	// Scroll to the leftmost window that still shows the selected column;
+	// start == sel always contains it, so the loop terminates.
+	start := 0
+	visible, used := visibleColumns(widths, start, avail)
+	for !slices.Contains(visible, sel) {
+		start++
+		visible, used = visibleColumns(widths, start, avail)
+	}
 
-	leftHidden := scroll > 0
+	leftHidden := start > 0
 	rightHidden := visible[len(visible)-1] < len(t.profiles)-1
 
 	var b strings.Builder

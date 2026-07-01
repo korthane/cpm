@@ -263,17 +263,23 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   the load path remains open and is verified/closed by Task 13
 
 ### Task 10: Plugin actions (enable/disable/uninstall/update/install)
-- [ ] row/cell selection + an action menu (keys: `e` enable, `d` disable, `u`
+- [x] row/cell selection + an action menu (keys: `e` enable, `d` disable, `u`
       update, `x` uninstall, `i` install-into-profile-where-absent)
-- [ ] each action runs the matching `claude plugin ...` via Runner against the
+- [x] each action runs the matching `claude plugin ...` via Runner against the
       selected profile, with a confirmation prompt for destructive ops
-- [ ] on success, refresh that profile's data (re-run Task 5 loader) and update
+- [x] on success, refresh that profile's data (re-run Task 5 loader) and update
       the matrix; show transient status/error line
-- [ ] write tests: each action invokes the correct CLI args + profile dir (fake
+- [x] write tests: each action invokes the correct CLI args + profile dir (fake
       runner records calls); confirmation gate blocks until confirmed
-- [ ] write tests: action failure surfaces an error and leaves state consistent;
+- [x] write tests: action failure surfaces an error and leaves state consistent;
       post-action refresh updates the cell
-- [ ] run tests + lint — must pass before Task 11
+- [x] run tests + lint — must pass before Task 11
+- ➕ discovered: ◀/▶ now move the cell selection instead of a raw scroll
+  offset; the table scrolls automatically to the leftmost window containing
+  the selected column, so Task 9's indicators/pinning behavior is preserved.
+  `x` uninstall is the confirmation-gated destructive op (y confirms, any
+  other key cancels); action keys are validated against the cell state
+  (e.g. `i` only where absent) with a hint on mismatch
 
 ### Task 11: MCP loader + MCP table view
 - [ ] capture real `claude mcp list` text output into `testdata/`; implement a
