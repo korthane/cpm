@@ -337,10 +337,10 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   wiring — only untested statements are `main()` itself)
 
 ### Task 14: [Final] Documentation
-- [ ] write `README.md`: what CPM is, install/build, usage (CLI args, config
+- [x] write `README.md`: what CPM is, install/build, usage (CLI args, config
       file, keybindings), screenshots/asciicast placeholder
-- [ ] document the config-file schema and profile-discovery precedence
-- [ ] note requirement that `claude` CLI must be on PATH
+- [x] document the config-file schema and profile-discovery precedence
+- [x] note requirement that `claude` CLI must be on PATH
 
 ## Technical Details
 
