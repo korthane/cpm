@@ -1,0 +1,26 @@
+[
+  {
+    "name": "claude-plugins-official",
+    "source": "github",
+    "repo": "anthropics/claude-plugins-official",
+    "installLocation": "/Users/u/.claude/plugins/marketplaces/claude-plugins-official"
+  },
+  {
+    "name": "elastic-agent-skills",
+    "source": "git",
+    "url": "https://github.com/elastic/agent-skills.git",
+    "installLocation": "/Users/u/.claude/plugins/marketplaces/elastic-agent-skills"
+  },
+  {
+    "name": "olomix-cc-thingz",
+    "source": "directory",
+    "path": "/Users/u/src/github.com/olomix/cc-thingz",
+    "installLocation": "/Users/u/src/github.com/olomix/cc-thingz"
+  },
+  {
+    "name": "ralphex",
+    "source": "github",
+    "repo": "umputun/ralphex",
+    "installLocation": "/Users/u/.claude/plugins/marketplaces/ralphex"
+  }
+]

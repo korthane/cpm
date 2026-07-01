@@ -195,16 +195,21 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   like a version tag, else empty (Task 6 fallback resolves the rest).
 
 ### Task 6: Fresh latest-version resolver
-- [ ] add `RefreshMarketplaces(ctx, Runner)` → `claude plugin marketplace update`
+- [x] add `RefreshMarketplaces(ctx, Runner)` → `claude plugin marketplace update`
       (all), and a resolver that reads fresh latest versions from
       `--available --json` after refresh (source of truth = post-update catalog)
-- [ ] add optional fallback: read `<installLocation>/.claude-plugin/marketplace.json`
+- [x] add optional fallback: read `<installLocation>/.claude-plugin/marketplace.json`
       `plugins[].version` when catalog lacks a ref
-- [ ] make refresh best-effort: on failure, fall back to cached version and flag
+- [x] make refresh best-effort: on failure, fall back to cached version and flag
       the value as stale (surface in UI later)
-- [ ] write tests: fake runner simulates update + available; resolver returns
+- [x] write tests: fake runner simulates update + available; resolver returns
       fresh versions; stale-fallback path on update error
-- [ ] run tests + lint — must pass before Task 7
+- [x] run tests + lint — must pass before Task 7
+- ➕ discovered: fallback needs marketplace install locations, so Task 6 also
+  adds `ListMarketplaces` (`plugin marketplace list --json` →
+  `[]Marketplace{Name, InstallLocation}`) with its own fixture + tests;
+  `RefreshMarketplaces`/`ResolveLatestVersions` take a `profileDir` (catalogs
+  are per profile), refining the plan's parameterless signature
 
 ### Task 7: Aggregate plugins into a comparison matrix
 - [ ] implement `BuildPluginMatrix(profiles, perProfilePluginData, latestVersions)`

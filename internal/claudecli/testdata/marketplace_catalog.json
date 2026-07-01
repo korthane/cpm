@@ -1,0 +1,23 @@
+{
+  "name": "ralphex",
+  "owner": {
+    "name": "umputun",
+    "email": "umputun@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "ralphex",
+      "source": "./",
+      "description": "Autonomous plan execution with Claude Code - task execution, monitoring, and plan creation",
+      "version": "0.17.0",
+      "author": {
+        "name": "umputun"
+      }
+    },
+    {
+      "name": "no-version-plugin",
+      "source": "./plugins/no-version",
+      "description": "Catalog entry without a version field"
+    }
+  ]
+}
