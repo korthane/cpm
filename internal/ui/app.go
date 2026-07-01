@@ -438,12 +438,18 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	// enterTab mutates scalar Model fields through a pointer receiver, so it
+	// must run before the return operand copies m: the Go spec leaves the
+	// order of a plain operand vs a call in `return m, m.enterTab()`
+	// unspecified (spec "Order of evaluation").
 	case "tab":
 		m.tab = (m.tab + 1) % tabCount
-		return m, m.enterTab()
+		cmd := m.enterTab()
+		return m, cmd
 	case "shift+tab":
 		m.tab = (m.tab + tabCount - 1) % tabCount
-		return m, m.enterTab()
+		cmd := m.enterTab()
+		return m, cmd
 	case "left":
 		m.selCol = max(0, m.selCol-1)
 		return m, nil
