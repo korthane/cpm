@@ -268,6 +268,47 @@ func TestMCPRemoveFailureSurfacesErrorAndKeepsState(t *testing.T) {
 	}
 }
 
+func TestMCPRemoveTimeoutRefreshesProfile(t *testing.T) {
+	// See TestActionTimeoutRefreshesProfile: a killed remove may have mutated
+	// the config, so the column must reload.
+	runner := &claudecli.FakeRunner{}
+	m := mcpModelWithServers(t, runner,
+		[]claudecli.MCPServer{{Name: "exa", Target: "https://mcp.exa.ai/mcp"}})
+
+	updated, refresh := m.Update(mcpActionDoneMsg{
+		index: 0, server: "exa",
+		err: errors.New("signal: killed"), uncertain: true,
+	})
+	got := updated.(Model)
+
+	if refresh == nil {
+		t.Fatal("timed-out remove triggered no refresh")
+	}
+	if got.columns[0].mcpStatus != statusLoading {
+		t.Errorf("column mcp status = %v, want loading during refresh", got.columns[0].mcpStatus)
+	}
+	if view := got.View(); !strings.Contains(view, "failed") {
+		t.Errorf("failure status missing:\n%s", view)
+	}
+}
+
+func TestMCPRemoveBlockedWhilePluginLoadInFlight(t *testing.T) {
+	// A plugin load runs `plugin marketplace update` (a config-dir write);
+	// letting `mcp remove` run alongside it would make two concurrent writers.
+	runner := &claudecli.FakeRunner{}
+	m := mcpModelWithServers(t, runner,
+		[]claudecli.MCPServer{{Name: "exa", Target: "https://mcp.exa.ai/mcp"}})
+	m.columns[0].status = statusLoading
+
+	m, cmd := press(t, m, "x")
+	if cmd != nil || m.pending != nil || len(mcpRemoveCalls(runner)) != 0 {
+		t.Fatal("remove armed while a plugin load was in flight")
+	}
+	if view := m.View(); !strings.Contains(view, "still loading plugin data") {
+		t.Errorf("loading hint missing:\n%s", view)
+	}
+}
+
 func TestMCPRemoveOnAbsentCellShowsHint(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := mcpModelWithServers(t, runner,

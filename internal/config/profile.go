@@ -76,10 +76,10 @@ func AutoDiscover(homeDir string) ([]Profile, error) {
 }
 
 // ResolveProfiles selects the effective profile set by precedence: non-empty
-// cliArgs win, else a non-empty config, else the discovered profiles. Paths from
-// cliArgs and config have ~ expanded against homeDir and are de-duplicated by
-// resolved path, preserving first-seen order; labels default to the path
-// basename when unset. An empty path is an error.
+// cliArgs win, else a non-empty config, else the discovered profiles. Paths
+// have ~ expanded against homeDir and are de-duplicated by resolved path,
+// preserving first-seen order; labels default to the path basename when
+// unset. An empty path is an error.
 func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir string) ([]Profile, error) {
 	switch {
 	case len(cliArgs) > 0:
@@ -91,7 +91,10 @@ func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir
 	case len(cfg.Profiles) > 0:
 		return normalize(cfg.Profiles, homeDir)
 	default:
-		return discovered, nil
+		// Discovered profiles need the dedup too: os.Stat in AutoDiscover
+		// follows symlinks, so ~/.claude-work -> ~/.claude would otherwise
+		// become two columns independently mutating one config dir.
+		return normalize(discovered, homeDir)
 	}
 }
 

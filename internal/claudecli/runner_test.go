@@ -190,11 +190,11 @@ func TestRealRunnerKillsHungProcess(t *testing.T) {
 }
 
 func TestRealRunnerTimeoutSurvivesPipeHoldingGrandchild(t *testing.T) {
-	// The timeout kill reaches only the direct child; a grandchild that
-	// inherited the stdout pipe (stdio MCP server, git) would keep Run
-	// blocked until it exits unless WaitDelay closes the pipes. The ready
-	// file gates the kill: cancelling on a fixed timer can fire before the
-	// stub has spawned the grandchild, which would pass without WaitDelay.
+	// A grandchild that inherited the stdout pipe (stdio MCP server, git)
+	// would keep Run blocked until it exits; the process-group kill (with
+	// WaitDelay closing the pipes as backstop) must bound the return. The
+	// ready file gates the kill: cancelling on a fixed timer can fire before
+	// the stub has spawned the grandchild, which would pass trivially.
 	ready := filepath.Join(t.TempDir(), "ready")
 	stub := writeScript(t, "#!/bin/sh\nsleep 30 &\ntouch "+ready+"\nwait\n")
 	r := &realRunner{binary: stub, waitDelay: 100 * time.Millisecond}

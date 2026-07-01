@@ -147,6 +147,32 @@ func TestLoadPluginsFreshBoundsRefreshWithOwnDeadline(t *testing.T) {
 	}
 }
 
+func TestLoadPluginsFreshDuplicateEntryKeepsResolvedVersion(t *testing.T) {
+	// A catalog can list the same plugin twice; a later duplicate without a
+	// version must not erase the version the first entry resolved.
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin marketplace update": {},
+			"plugin list --available --json": {Stdout: []byte(`{
+				"installed": [],
+				"available": [
+					{"pluginId": "a@m1", "version": "1.2.0", "source": "./a"},
+					{"pluginId": "a@m1", "source": "./a"}
+				]
+			}`)},
+			"plugin marketplace list --json": {Stdout: []byte(`[]`)},
+		},
+	}
+
+	_, lv, err := LoadPluginsFresh(t.Context(), f, "/home/u/.claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v := lv.Versions[PluginID{Name: "a", Marketplace: "m1"}]; v != "1.2.0" {
+		t.Errorf("a@m1 = %q, want 1.2.0 kept from the first entry", v)
+	}
+}
+
 func TestLoadPluginsCachedSkipsMarketplaceUpdate(t *testing.T) {
 	f := &FakeRunner{
 		Responses: map[string]FakeResponse{

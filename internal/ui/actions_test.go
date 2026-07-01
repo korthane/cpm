@@ -196,6 +196,29 @@ func TestActionFailureSurfacesErrorAndKeepsState(t *testing.T) {
 	}
 }
 
+func TestActionTimeoutRefreshesProfile(t *testing.T) {
+	// A timed-out action was killed mid-flight: its write may have (partially)
+	// applied, so the column must reload instead of trusting its old data.
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, installedFoo(true))
+
+	updated, refresh := m.Update(actionDoneMsg{
+		index: 0, verb: "update", plugin: fooID,
+		err: errors.New("signal: killed"), uncertain: true,
+	})
+	got := updated.(Model)
+
+	if refresh == nil {
+		t.Fatal("timed-out action triggered no refresh")
+	}
+	if got.columns[0].status != statusLoading {
+		t.Errorf("column status = %v, want loading during refresh", got.columns[0].status)
+	}
+	if view := got.View(); !strings.Contains(view, "failed") {
+		t.Errorf("failure status missing:\n%s", view)
+	}
+}
+
 func TestActionSuccessRefreshesProfile(t *testing.T) {
 	runner := &claudecli.FakeRunner{Responses: map[string]claudecli.FakeResponse{}}
 	m := modelWithCells(t, runner, installedFoo(true), installedFoo(true))

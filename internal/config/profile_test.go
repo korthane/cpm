@@ -203,6 +203,33 @@ func TestResolveProfiles(t *testing.T) {
 		}
 	})
 
+	t.Run("discovered symlink alias collapses to one profile", func(t *testing.T) {
+		// AutoDiscover stats through symlinks, so ~/.claude-work -> ~/.claude
+		// yields two entries for one physical config dir; resolution must
+		// collapse them or two columns would mutate the same dir concurrently.
+		tmpHome := t.TempDir()
+		realDir := filepath.Join(tmpHome, ".claude")
+		mustMkdir(t, realDir)
+		if err := os.Symlink(realDir, filepath.Join(tmpHome, ".claude-work")); err != nil {
+			t.Fatal(err)
+		}
+		discovered, err := AutoDiscover(tmpHome)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(discovered) != 2 {
+			t.Fatalf("discovered %+v, want the dir and its symlink alias", discovered)
+		}
+		got, err := ResolveProfiles(nil, Config{}, discovered, tmpHome)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []Profile{{Path: realDir, Label: ".claude"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
 	t.Run("bare tilde expands to home", func(t *testing.T) {
 		got, err := ResolveProfiles([]string{"~"}, Config{}, nil, home)
 		if err != nil {

@@ -75,11 +75,19 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 	}
 
 	lv := LatestVersions{Versions: map[PluginID]string{}}
-	unresolved := false
 	for _, a := range data.Available {
-		lv.Versions[a.ID] = a.LatestVersion
-		if a.LatestVersion == "" {
+		// Catalogs can list the same plugin twice (e.g. one marketplace under
+		// two entries); a later duplicate without a version must not erase an
+		// already-resolved one.
+		if lv.Versions[a.ID] == "" {
+			lv.Versions[a.ID] = a.LatestVersion
+		}
+	}
+	unresolved := false
+	for _, v := range lv.Versions {
+		if v == "" {
 			unresolved = true
+			break
 		}
 	}
 	if unresolved {

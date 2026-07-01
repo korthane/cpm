@@ -172,18 +172,23 @@ type mcpErrMsg struct {
 }
 
 // actionDoneMsg reports a finished plugin action against one profile.
+// uncertain marks a timed-out action: the CLI was killed mid-flight, so the
+// write may have (partially) applied and the column data cannot be trusted.
 type actionDoneMsg struct {
-	index  int
-	verb   string
-	plugin claudecli.PluginID
-	err    error
+	index     int
+	verb      string
+	plugin    claudecli.PluginID
+	err       error
+	uncertain bool
 }
 
-// mcpActionDoneMsg reports a finished MCP remove against one profile.
+// mcpActionDoneMsg reports a finished MCP remove against one profile; see
+// actionDoneMsg for uncertain.
 type mcpActionDoneMsg struct {
-	index  int
-	server string
-	err    error
+	index     int
+	server    string
+	err       error
+	uncertain bool
 }
 
 // Init fans out one load command per profile (they run in parallel) plus the
@@ -326,13 +331,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col := &m.columns[msg.index]
 		col.busy = false
 		if msg.err != nil {
-			// The action changed nothing, so the column's data stays valid.
 			m.setStatus(fmt.Sprintf("%s %s in %s failed: %v",
 				msg.verb, msg.plugin, col.profile.Label, msg.err), true)
-			return m, nil
+			// A CLI-reported failure changed nothing, so the column's data
+			// stays valid. A timed-out action may have (partially) applied
+			// before the kill, so the column must be reloaded.
+			if !msg.uncertain {
+				return m, nil
+			}
+		} else {
+			m.setStatus(fmt.Sprintf("%s %s in %s: done",
+				msg.verb, msg.plugin, col.profile.Label), false)
 		}
-		m.setStatus(fmt.Sprintf("%s %s in %s: done",
-			msg.verb, msg.plugin, col.profile.Label), false)
 		col.status = statusLoading
 		col.err = nil
 		col.gen++
@@ -345,13 +355,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col := &m.columns[msg.index]
 		col.busy = false
 		if msg.err != nil {
-			// The remove changed nothing, so the column's MCP data stays valid.
 			m.setStatus(fmt.Sprintf("remove %s in %s failed: %v",
 				msg.server, col.profile.Label, msg.err), true)
-			return m, nil
+			// Same split as actionDoneMsg: only a timed-out remove may have
+			// mutated the config, so only then reload the column.
+			if !msg.uncertain {
+				return m, nil
+			}
+		} else {
+			m.setStatus(fmt.Sprintf("remove %s in %s: done",
+				msg.server, col.profile.Label), false)
 		}
-		m.setStatus(fmt.Sprintf("remove %s in %s: done",
-			msg.server, col.profile.Label), false)
 		col.mcpStatus = statusLoading
 		col.mcpErr = nil
 		col.mcpGen++
@@ -588,6 +602,12 @@ func (m Model) startMCPAction(key string) (tea.Model, tea.Cmd) {
 		m.setStatus(col.profile.Label+" is not loaded yet", true)
 		return m, nil
 	}
+	// An in-flight plugin load runs `plugin marketplace update` (a write);
+	// `mcp remove` would be a second concurrent writer on the same config dir.
+	if col.status == statusLoading {
+		m.setStatus(col.profile.Label+" is still loading plugin data", true)
+		return m, nil
+	}
 	if col.busy {
 		m.setStatus(col.profile.Label+" has an action in progress", true)
 		return m, nil
@@ -624,7 +644,8 @@ func runMCPRemove(r claudecli.Runner, index int, profileDir, name string) tea.Cm
 		// row (cwd-dependent, shown identically in every column) would be
 		// silently deleted from config shared by all profiles.
 		_, err := r.Run(ctx, profileDir, "mcp", "remove", "--scope", "user", name)
-		return mcpActionDoneMsg{index: index, server: name, err: err}
+		return mcpActionDoneMsg{index: index, server: name, err: err,
+			uncertain: err != nil && ctx.Err() != nil}
 	}
 }
 
@@ -635,7 +656,8 @@ func runPluginAction(r claudecli.Runner, index int, profileDir string,
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
 		_, err := r.Run(ctx, profileDir, "plugin", verb, plugin.String())
-		return actionDoneMsg{index: index, verb: verb, plugin: plugin, err: err}
+		return actionDoneMsg{index: index, verb: verb, plugin: plugin, err: err,
+			uncertain: err != nil && ctx.Err() != nil}
 	}
 }
 

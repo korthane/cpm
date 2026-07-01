@@ -60,11 +60,13 @@ func NewRunner() Runner {
 
 func (r *realRunner) Run(ctx context.Context, profileDir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, r.binary, args...)
-	// On timeout CommandContext kills only claude itself, but its children
+	// On timeout the default cancel kills only claude itself; its children
 	// (stdio MCP servers spawned by `mcp list`, git spawned by `marketplace
-	// update`) inherit the stdout/stderr pipes and would keep cmd.Run blocked
-	// until they exit — defeating the very timeout the UI relies on. WaitDelay
-	// forces the pipes closed shortly after the kill so Run returns an error.
+	// update`) would survive as orphans and keep the stdout/stderr pipes open,
+	// blocking cmd.Run past the very timeout the UI relies on. Kill the whole
+	// process group instead (where the platform supports it), with WaitDelay
+	// as the backstop that force-closes the pipes if anything still lingers.
+	setProcessGroup(cmd)
 	cmd.WaitDelay = cmp.Or(r.waitDelay, 5*time.Second)
 	if profileDir != "" {
 		cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+profileDir)
