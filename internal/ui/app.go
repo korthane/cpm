@@ -80,10 +80,21 @@ type Model struct {
 }
 
 // pendingAction is an action held back behind the confirmation prompt.
+// Exactly one target is set: plugin for plugin actions, server for MCP
+// removes.
 type pendingAction struct {
 	verb   string
 	plugin claudecli.PluginID
+	server string
 	col    int
+}
+
+// target is the pending action's subject as shown in the prompt.
+func (p pendingAction) target() string {
+	if p.server != "" {
+		return p.server
+	}
+	return p.plugin.String()
 }
 
 // New builds the root model for the given profiles. All columns start in the
@@ -129,6 +140,13 @@ type actionDoneMsg struct {
 	index  int
 	verb   string
 	plugin claudecli.PluginID
+	err    error
+}
+
+// mcpActionDoneMsg reports a finished MCP remove against one profile.
+type mcpActionDoneMsg struct {
+	index  int
+	server string
 	err    error
 }
 
@@ -235,6 +253,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			col.spinner.Tick,
 		)
 
+	case mcpActionDoneMsg:
+		col := &m.columns[msg.index]
+		if msg.err != nil {
+			// The remove changed nothing, so the column's MCP data stays valid.
+			m.setStatus(fmt.Sprintf("remove %s in %s failed: %v",
+				msg.server, col.profile.Label, msg.err), true)
+			return m, nil
+		}
+		m.setStatus(fmt.Sprintf("remove %s in %s: done",
+			msg.server, col.profile.Label), false)
+		col.mcpStatus = statusLoading
+		col.mcpErr = nil
+		return m, tea.Batch(
+			loadMCPProfile(m.runner, msg.index, col.profile.Path),
+			col.spinner.Tick,
+		)
+
 	case spinner.TickMsg:
 		// Each spinner only reacts to its own tick (matched by ID), so
 		// forwarding to loading columns keeps exactly their ticks alive.
@@ -305,7 +340,7 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.tab == tabPlugins {
 			return m.startAction(key.String())
 		}
-		return m, nil
+		return m.startMCPAction(key.String())
 	}
 	return m, nil
 }
@@ -320,7 +355,10 @@ func (m Model) handleConfirmKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	col := m.columns[p.col]
-	m.setStatus(fmt.Sprintf("%s %s in %s…", p.verb, p.plugin, col.profile.Label), false)
+	m.setStatus(fmt.Sprintf("%s %s in %s…", p.verb, p.target(), col.profile.Label), false)
+	if p.server != "" {
+		return m, runMCPRemove(m.runner, p.col, col.profile.Path, p.server)
+	}
 	return m, runPluginAction(m.runner, p.col, col.profile.Path, p.plugin, p.verb)
 }
 
@@ -378,6 +416,46 @@ func actionAllowed(verb string, state model.CellState) bool {
 	}
 }
 
+// startMCPAction handles action keys on the MCP tab: x arms the remove
+// confirmation for the selected cell, i explains that add is out of scope
+// (per IDEA: MCP add needs cmd/url/args capture — future work), and the
+// remaining plugin keys are ignored (MCP has no enable/disable/update).
+func (m Model) startMCPAction(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "i":
+		m.setStatus("MCP add is not yet supported — use `claude mcp add` directly", false)
+		return m, nil
+	case "x":
+	default:
+		return m, nil
+	}
+	rows := m.mcpRows()
+	if len(rows) == 0 {
+		return m, nil
+	}
+	row := rows[min(m.selRow, len(rows)-1)]
+	col := m.columns[m.selCol]
+	if col.mcpStatus != statusLoaded {
+		m.setStatus(col.profile.Label+" is not loaded yet", true)
+		return m, nil
+	}
+	if !row.Cells[m.selCol].Present {
+		m.setStatus(fmt.Sprintf("cannot remove %s in %s", row.Name, col.profile.Label), true)
+		return m, nil
+	}
+	// Remove is destructive (the server's config is not recoverable from CPM),
+	// so it is always confirmation-gated.
+	m.pending = &pendingAction{verb: "remove", server: row.Name, col: m.selCol}
+	return m, nil
+}
+
+func runMCPRemove(r claudecli.Runner, index int, profileDir, name string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := r.Run(context.Background(), profileDir, "mcp", "remove", name)
+		return mcpActionDoneMsg{index: index, server: name, err: err}
+	}
+}
+
 func runPluginAction(r claudecli.Runner, index int, profileDir string,
 	plugin claudecli.PluginID, verb string,
 ) tea.Cmd {
@@ -430,6 +508,8 @@ func (m Model) View() string {
 	b.WriteString("\n←/→ ↑/↓: select  tab: switch  r: reload  q: quit")
 	if m.tab == tabPlugins {
 		b.WriteString("\ne: enable  d: disable  u: update  x: uninstall  i: install")
+	} else {
+		b.WriteString("\nx: remove")
 	}
 	b.WriteString("\n")
 	return b.String()
@@ -439,7 +519,7 @@ func (m Model) View() string {
 // the transient status/error text (possibly empty).
 func (m Model) statusLine() string {
 	if m.pending != nil {
-		return fmt.Sprintf("%s %s from %s? y/n", m.pending.verb, m.pending.plugin,
+		return fmt.Sprintf("%s %s from %s? y/n", m.pending.verb, m.pending.target(),
 			m.columns[m.pending.col].profile.Label)
 	}
 	if m.status == "" {

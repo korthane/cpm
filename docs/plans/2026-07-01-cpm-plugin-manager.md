@@ -303,13 +303,18 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   reload does not pay that cost)
 
 ### Task 12: MCP actions (remove; add deferred)
-- [ ] `x` remove → `claude mcp remove <name>` against selected profile, with
+- [x] `x` remove → `claude mcp remove <name>` against selected profile, with
       confirmation, then refresh that profile's MCP data
-- [ ] show a clear "add not yet supported" hint where install would appear
+- [x] show a clear "add not yet supported" hint where install would appear
       (per IDEA: no update for MCP; add needs cmd/url/args — future scope)
-- [ ] write tests: remove invokes correct args + profile; confirmation gate;
+- [x] write tests: remove invokes correct args + profile; confirmation gate;
       failure surfaces error; refresh updates the cell
-- [ ] run tests + lint — must pass before Task 13
+- [x] run tests + lint — must pass before Task 13
+- ➕ discovered: remove reuses the Task 10 confirmation machinery — the
+  pending action now carries either a plugin ID or an MCP server name, and
+  a successful remove refreshes only that profile's MCP data (not plugins).
+  The `i` key on the MCP tab shows the add-not-supported hint; `e`/`d`/`u`
+  stay ignored there, and the MCP tab's key help shows only `x: remove`
 
 ### Task 13: Verify acceptance criteria
 - [ ] verify all Overview requirements are implemented (two tabs, per-profile
