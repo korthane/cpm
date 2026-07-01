@@ -1,0 +1,22 @@
+# Binaries
+/cpm
+/dist/
+*.exe
+*.test
+*.out
+
+# Go
+/vendor/
+go.work
+go.work.sum
+
+# Coverage
+coverage.txt
+coverage.html
+*.cover
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
