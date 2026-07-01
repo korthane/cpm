@@ -192,21 +192,35 @@ type mcpActionDoneMsg struct {
 }
 
 // Init fans out one load command per profile (they run in parallel) plus the
-// spinner tick.
-func (m Model) Init() tea.Cmd { return m.loadAll() }
-
-func (m Model) loadAll() tea.Cmd {
+// spinner tick. Columns start in the loading state, so this cannot share the
+// statusLoading gate reloadPlugins uses.
+func (m Model) Init() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
 	for i := range m.columns {
-		// A busy column has a mutating claude action in flight; the fresh load
-		// runs `plugin marketplace update` (a write), and two writers on one
-		// config dir can corrupt it. The post-action refresh covers the column
-		// instead. (Init never sees busy columns, so this only gates reloads.)
-		if m.columns[i].busy {
-			continue
-		}
 		m.columns[i].gen++
 		cmds = append(cmds, loadProfile(m.runner, i, m.columns[i].gen, m.columns[i].profile.Path))
+	}
+	cmds = append(cmds, m.spinner.Tick)
+	return tea.Batch(cmds...)
+}
+
+// reloadPlugins refires the plugin load for every idle column. Busy columns
+// (mutating action in flight) and still-loading columns are skipped: the
+// fresh load runs `plugin marketplace update` (a write), and two writers on
+// one config dir can corrupt it — the gen stamp only drops a superseded
+// load's result, it cannot stop its in-flight process. Skipped columns keep
+// their state; the post-action refresh / in-flight load covers them.
+func (m Model) reloadPlugins() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
+	for i := range m.columns {
+		col := &m.columns[i]
+		if col.busy || col.status == statusLoading {
+			continue
+		}
+		col.status = statusLoading
+		col.err = nil
+		col.gen++
+		cmds = append(cmds, loadProfile(m.runner, i, col.gen, col.profile.Path))
 	}
 	cmds = append(cmds, m.spinner.Tick)
 	return tea.Batch(cmds...)
@@ -346,10 +360,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col.status = statusLoading
 		col.err = nil
 		col.gen++
-		return m, tea.Batch(
+		cmds := []tea.Cmd{
 			refreshProfile(m.runner, msg.index, col.gen, col.profile.Path, col.latest.Stale),
 			m.spinner.Tick,
-		)
+		}
+		// Plugin actions can add or remove plugin-provided MCP servers
+		// (plugin:<plugin>:<name>), so a loaded MCP tab must reload this
+		// column too or it keeps showing servers of an uninstalled plugin.
+		// The gen bump also supersedes any mcp list that read mid-mutation.
+		if m.mcpStarted {
+			col.mcpStatus = statusLoading
+			col.mcpErr = nil
+			col.mcpGen++
+			cmds = append(cmds, loadMCPProfile(m.runner, msg.index, col.mcpGen, col.profile.Path))
+		}
+		return m, tea.Batch(cmds...)
 
 	case mcpActionDoneMsg:
 		col := &m.columns[msg.index]
@@ -447,17 +472,7 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.loadMCPAll()
 		}
-		// Busy columns keep their state: loadAll skips them (its marketplace
-		// refresh writes to the config dir the in-flight action is mutating),
-		// so marking them loading would leave a spinner nothing feeds.
-		for i := range m.columns {
-			if m.columns[i].busy {
-				continue
-			}
-			m.columns[i].status = statusLoading
-			m.columns[i].err = nil
-		}
-		return m, m.loadAll()
+		return m, m.reloadPlugins()
 	case "e", "d", "u", "x", "i":
 		if m.tab == tabPlugins {
 			return m.startAction(key.String())
@@ -655,7 +670,11 @@ func runPluginAction(r claudecli.Runner, index int, profileDir string,
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		_, err := r.Run(ctx, profileDir, "plugin", verb, plugin.String())
+		// Scope is pinned to user — the profile's own config. enable/disable
+		// default to auto-detect, so acting on a project/local-scope plugin
+		// (cwd-dependent, shown identically in every column) would silently
+		// mutate config shared by all profiles.
+		_, err := r.Run(ctx, profileDir, "plugin", verb, "--scope", "user", plugin.String())
 		return actionDoneMsg{index: index, verb: verb, plugin: plugin, err: err,
 			uncertain: err != nil && ctx.Err() != nil}
 	}

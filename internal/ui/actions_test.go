@@ -64,12 +64,13 @@ func press(t *testing.T, m Model, key string) (Model, tea.Cmd) {
 	return updated.(Model), cmd
 }
 
-// pluginCalls filters the fake's recorded calls down to `plugin <verb> <id>`
-// action invocations, excluding the list/auth reads issued by refreshes.
+// pluginCalls filters the fake's recorded calls down to
+// `plugin <verb> --scope user <id>` action invocations, excluding the
+// list/auth reads issued by refreshes.
 func pluginCalls(runner *claudecli.FakeRunner, verb string) []claudecli.FakeCall {
 	var calls []claudecli.FakeCall
 	for _, c := range runner.Calls {
-		if len(c.Args) == 3 && c.Args[0] == "plugin" && c.Args[1] == verb {
+		if len(c.Args) == 5 && c.Args[0] == "plugin" && c.Args[1] == verb {
 			calls = append(calls, c)
 		}
 	}
@@ -122,7 +123,7 @@ func TestActionKeysInvokeCorrectCLI(t *testing.T) {
 			if calls[0].ProfileDir != wantDir {
 				t.Errorf("profile dir = %q, want %q", calls[0].ProfileDir, wantDir)
 			}
-			wantArgs := []string{"plugin", tt.verb, "foo@mp"}
+			wantArgs := []string{"plugin", tt.verb, "--scope", "user", "foo@mp"}
 			if !slices.Equal(calls[0].Args, wantArgs) {
 				t.Errorf("args = %v, want %v", calls[0].Args, wantArgs)
 			}
@@ -164,7 +165,7 @@ func TestUninstallBlockedUntilConfirmed(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("got %d uninstall calls after confirm, want 1", len(calls))
 	}
-	if !slices.Equal(calls[0].Args, []string{"plugin", "uninstall", "foo@mp"}) {
+	if !slices.Equal(calls[0].Args, []string{"plugin", "uninstall", "--scope", "user", "foo@mp"}) {
 		t.Errorf("args = %v", calls[0].Args)
 	}
 }
@@ -172,7 +173,7 @@ func TestUninstallBlockedUntilConfirmed(t *testing.T) {
 func TestActionFailureSurfacesErrorAndKeepsState(t *testing.T) {
 	runner := &claudecli.FakeRunner{
 		Responses: map[string]claudecli.FakeResponse{
-			"plugin update foo@mp": {Err: errors.New("boom")},
+			"plugin update --scope user foo@mp": {Err: errors.New("boom")},
 		},
 	}
 	m := modelWithCells(t, runner, installedFoo(true))
@@ -348,6 +349,54 @@ func TestReloadSkipsBusyColumn(t *testing.T) {
 	}
 	if m.columns[1].gen != 1 {
 		t.Errorf("idle column gen = %d, want 1", m.columns[1].gen)
+	}
+}
+
+func TestReloadSkipsLoadingColumn(t *testing.T) {
+	// A loading column already has a `plugin marketplace update` (a write) in
+	// flight; a second load would be a concurrent writer on the same config
+	// dir, and the gen stamp cannot kill the in-flight process.
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, installedFoo(true))
+
+	m, _ = press(t, m, "r")
+	if m.columns[0].gen != 1 || m.columns[0].status != statusLoading {
+		t.Fatalf("first reload: gen = %d, status = %v, want 1/loading",
+			m.columns[0].gen, m.columns[0].status)
+	}
+	m, _ = press(t, m, "r")
+	if m.columns[0].gen != 1 {
+		t.Errorf("reload while loading fired a second load: gen = %d, want 1", m.columns[0].gen)
+	}
+}
+
+func TestActionRefreshReloadsStartedMCPTab(t *testing.T) {
+	// Plugin actions can add or remove plugin-provided MCP servers, so a
+	// loaded MCP tab must reload the acted-on column too — otherwise it keeps
+	// showing servers of an uninstalled plugin.
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, installedFoo(true))
+	m, _ = press(t, m, "tab") // starts the lazy MCP load
+	loaded, _ := m.Update(mcpLoadedMsg{index: 0, gen: m.columns[0].mcpGen,
+		servers: []claudecli.MCPServer{{Name: "plugin:foo:srv", Target: "stdio"}}})
+	m = loaded.(Model)
+	m, _ = press(t, m, "tab") // back to plugins
+
+	m, cmd := press(t, m, "u")
+	updated, refresh := m.Update(cmd())
+	got := updated.(Model)
+
+	if got.columns[0].mcpStatus != statusLoading {
+		t.Errorf("mcpStatus = %v, want loading after plugin action", got.columns[0].mcpStatus)
+	}
+	var mcpReloaded bool
+	for _, msg := range drain(t, refresh) {
+		if l, ok := msg.(mcpLoadedMsg); ok && l.gen == got.columns[0].mcpGen {
+			mcpReloaded = true
+		}
+	}
+	if !mcpReloaded {
+		t.Error("post-action refresh fired no MCP reload for the acted column")
 	}
 }
 
@@ -563,7 +612,7 @@ func TestRowSelectionMovesAndClamps(t *testing.T) {
 	}
 	cmd()
 	calls := pluginCalls(runner, "disable")
-	if len(calls) != 1 || !slices.Equal(calls[0].Args, []string{"plugin", "disable", "foo@mp"}) {
+	if len(calls) != 1 || !slices.Equal(calls[0].Args, []string{"plugin", "disable", "--scope", "user", "foo@mp"}) {
 		t.Errorf("disable did not target selected row foo@mp: %v", runner.Calls)
 	}
 }
