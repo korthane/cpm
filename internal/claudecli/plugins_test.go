@@ -108,6 +108,7 @@ func TestIsVersionRef(t *testing.T) {
 		{"1.2.3", true},
 		{"v1.5.5", true},
 		{"2.0.0-rc1", true},
+		{"1.2.3-beta.1", true},
 		{"1.2", true},
 		{"main", false},
 		{"2024-rework", false}, // digit-leading branch name, not a version
@@ -115,6 +116,9 @@ func TestIsVersionRef(t *testing.T) {
 		{"v2", false},
 		{"1.", false},
 		{"1.x", false},
+		{"1.2x", false},    // digits must end the segment
+		{"1.2-", false},    // empty pre-release suffix is not a version
+		{"1.2-x!y", false}, // pre-release chars are alphanumeric/dot/hyphen
 		{"", false},
 	}
 	for _, tt := range tests {

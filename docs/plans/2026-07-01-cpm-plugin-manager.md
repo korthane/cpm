@@ -262,6 +262,9 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   `model.LatestVersions` (union of per-profile `--available` catalogs, newest
   wins) — wiring the fresh `ResolveLatestVersions` refresh + stale flag into
   the load path remains open and is verified/closed by Task 13
+- ➕ review pass added vertical scrolling: rows render in a height-bounded
+  window that follows the selected row, with an `… rows X–Y of Z` overflow
+  marker for hidden rows
 
 ### Task 10: Plugin actions (enable/disable/uninstall/update/install)
 - [x] row/cell selection + an action menu (keys: `e` enable, `d` disable, `u`
@@ -343,6 +346,9 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
       file, keybindings), screenshots/asciicast placeholder
 - [x] document the config-file schema and profile-discovery precedence
 - [x] note requirement that `claude` CLI must be on PATH
+- ➕ the screenshots/asciicast placeholder was intentionally dropped: an empty
+  placeholder section adds no value to the README; media can be added with a
+  real capture later
 
 ## Technical Details
 

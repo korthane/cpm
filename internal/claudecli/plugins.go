@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -37,7 +38,7 @@ type InstalledPlugin struct {
 
 // AvailablePlugin is a marketplace catalog entry. LatestVersion is empty when
 // the catalog carries no version (e.g. a branch ref or a bare url source);
-// the marketplace.json fallback resolves those (Task 6).
+// the marketplace.json fallback in LoadPluginsFresh resolves those.
 type AvailablePlugin struct {
 	ID            PluginID
 	LatestVersion string
@@ -126,33 +127,16 @@ func latestVersion(a availableJSON) string {
 	return ""
 }
 
-// isVersionRef reports whether ref looks like a version tag: dotted numbers,
-// optionally after a leading "v" and optionally with a "-suffix" pre-release
-// part (e.g. "1.2.3", "v1.5.5", "2.0.0-rc1"). At least one dot is required:
-// a bare leading digit is not enough, or branch names like "2024-rework"
-// would be shown as versions.
+// versionRef matches a version tag: dotted numbers, optionally after a
+// leading "v" and optionally with a "-prerelease" suffix (e.g. "1.2.3",
+// "v1.5.5", "2.0.0-rc1"). At least one dot is required — a bare leading digit
+// is not enough, or branch names like "2024-rework" would be shown as
+// versions — and the suffix must be non-empty alphanumeric/dot/hyphen, so
+// refs like "1.2-" or "1.2-x!y" stay branches.
+var versionRef = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+)+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
+
+// isVersionRef reports whether ref looks like a version tag rather than a
+// branch name.
 func isVersionRef(ref string) bool {
-	ref = strings.TrimPrefix(ref, "v")
-	dots := 0
-	for i := 0; ; {
-		start := i
-		for i < len(ref) && ref[i] >= '0' && ref[i] <= '9' {
-			i++
-		}
-		if i == start {
-			return false
-		}
-		if i == len(ref) {
-			return dots > 0
-		}
-		switch ref[i] {
-		case '.':
-			dots++
-			i++
-		case '-':
-			return dots > 0
-		default:
-			return false
-		}
-	}
+	return versionRef.MatchString(ref)
 }

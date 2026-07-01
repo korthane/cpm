@@ -379,13 +379,17 @@ func TestShiftTabSwitchesTabAndStartsMCPLoad(t *testing.T) {
 }
 
 func TestActionKeysIgnoredOnMCPTab(t *testing.T) {
-	runner := &claudecli.FakeRunner{}
-	m := modelWithCells(t, runner, installedFoo(true))
+	for _, key := range []string{"e", "d", "u"} {
+		t.Run(key, func(t *testing.T) {
+			runner := &claudecli.FakeRunner{}
+			m := modelWithCells(t, runner, installedFoo(true))
 
-	m, _ = press(t, m, "tab")
-	_, cmd := press(t, m, "d")
-	if cmd != nil || len(runner.Calls) != 0 {
-		t.Fatal("action key acted on the MCP tab")
+			m, _ = press(t, m, "tab")
+			_, cmd := press(t, m, key)
+			if cmd != nil || len(runner.Calls) != 0 {
+				t.Fatalf("action key %q acted on the MCP tab", key)
+			}
+		})
 	}
 }
 

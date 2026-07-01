@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/korthane/cpm/internal/claudecli"
 	"github.com/korthane/cpm/internal/config"
@@ -204,6 +205,54 @@ func TestAuthFailureDegradesToBlankHeader(t *testing.T) {
 	// must stay blank rather than claim "not logged in".
 	if view := m.View(); strings.Contains(view, "not logged in") {
 		t.Errorf("auth failure rendered as logged-out header:\n%s", view)
+	}
+}
+
+func TestStatusLineTruncatedToTerminalWidth(t *testing.T) {
+	// rowWindow budgets exactly one row for the status line; a longer one
+	// would soft-wrap and push the header chrome off the alt screen.
+	m := modelWithCells(t, &claudecli.FakeRunner{}, installedFoo(true))
+	m.setStatus(strings.Repeat("boom ", 100), true)
+
+	if got := lipgloss.Width(m.statusLine()); got > m.width {
+		t.Errorf("status line is %d cells wide, want at most %d", got, m.width)
+	}
+}
+
+func TestFailedReloadColumnProducesNoPhantomRows(t *testing.T) {
+	barData := claudecli.PluginData{
+		Installed: []claudecli.InstalledPlugin{
+			{ID: claudecli.PluginID{Name: "bar", Marketplace: "mp"}, Version: "1.0.0", Enabled: true},
+		},
+	}
+	m := modelWithCells(t, &claudecli.FakeRunner{}, installedFoo(true), barData)
+
+	// The failed reload keeps the column's stale data, but its cells render
+	// blank, so a row owned only by that column would show no owner at all.
+	updated, _ := m.Update(profileErrMsg{index: 1, err: errors.New("reload failed")})
+	m = updated.(Model)
+
+	rows := m.pluginRows()
+	if len(rows) != 1 || rows[0].ID.Name != "foo" {
+		t.Fatalf("rows after failed reload = %+v, want only foo", rows)
+	}
+}
+
+func TestLoggedInWithoutAccountFieldsShowsFallbackHeader(t *testing.T) {
+	runner := okRunner()
+	runner.Responses["auth status --json"] = claudecli.FakeResponse{
+		Stdout: []byte(`{"loggedIn": true}`),
+	}
+	m := New(runner, testProfiles[:1])
+
+	for _, msg := range drain(t, m.Init()) {
+		updated, _ := m.Update(msg)
+		m = updated.(Model)
+	}
+	if view := m.View(); !strings.Contains(view, "logged in") ||
+		strings.Contains(view, "not logged in") {
+		t.Errorf("logged-in profile without email/plan should show the "+
+			"\"logged in\" fallback header:\n%s", view)
 	}
 }
 

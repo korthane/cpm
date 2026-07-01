@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFakeRunnerReturnsCannedOutputAndRecordsCalls(t *testing.T) {
@@ -165,5 +166,25 @@ func TestRealRunnerHonorsCancelledContext(t *testing.T) {
 
 	if _, err := r.Run(ctx, "", "anything"); err == nil {
 		t.Fatal("expected error from a cancelled context, got nil")
+	}
+}
+
+func TestRealRunnerKillsHungProcess(t *testing.T) {
+	// The UI relies on command timeouts to degrade a hung claude to a
+	// per-column error; this pins the mid-execution kill, not just the
+	// pre-cancelled fast path above.
+	stub := writeScript(t, "#!/bin/sh\nsleep 30\n")
+	r := &realRunner{binary: stub}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := r.Run(ctx, "", "anything")
+	if err == nil {
+		t.Fatal("expected error from a timed-out run, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("run took %v, the process was not killed on timeout", elapsed)
 	}
 }

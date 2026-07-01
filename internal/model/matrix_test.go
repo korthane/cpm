@@ -92,6 +92,9 @@ func TestBuildPluginMatrixLatestVersionAndOutdated(t *testing.T) {
 		{"pre-release behind its release", "1.0.0-rc1", "1.0.0", true},
 		{"release not behind its pre-release", "1.0.0", "1.0.0-rc1", false},
 		{"pre-releases ordered lexically", "1.0.0-rc1", "1.0.0-rc2", true},
+		{"non-numeric segments compared lexically", "1.2.x", "1.2.y", true},
+		{"fully non-numeric never outdated when equal", "beta", "beta", false},
+		{"fully non-numeric compared lexically", "alpha", "beta", true},
 	}
 
 	for _, tt := range tests {

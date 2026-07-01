@@ -77,34 +77,28 @@ func fillFromCatalogFiles(ctx context.Context, r Runner, profileDir string, vers
 		return
 	}
 
-	locations := make(map[string]string, len(markets))
-	for _, m := range markets {
-		locations[m.Name] = m.InstallLocation
-	}
-
-	catalogs := map[string]map[string]string{}
-	for id, version := range versions {
-		if version != "" {
+	for _, mkt := range markets {
+		var missing []PluginID
+		for id, version := range versions {
+			if version == "" && id.Marketplace == mkt.Name {
+				missing = append(missing, id)
+			}
+		}
+		if len(missing) == 0 {
 			continue
 		}
-		location, ok := locations[id.Marketplace]
-		if !ok {
-			continue
-		}
-		catalog, ok := catalogs[id.Marketplace]
-		if !ok {
-			catalog = readCatalogFile(location)
-			catalogs[id.Marketplace] = catalog
-		}
-		if v := catalog[id.Name]; v != "" {
-			versions[id] = v
+		catalog := readCatalogFile(mkt.InstallLocation)
+		for _, id := range missing {
+			if v := catalog[id.Name]; v != "" {
+				versions[id] = v
+			}
 		}
 	}
 }
 
 // readCatalogFile reads <installLocation>/.claude-plugin/marketplace.json and
-// returns plugin name → version. Errors yield an empty (non-nil) map so the
-// caller caches the miss instead of retrying.
+// returns plugin name → version; an unreadable or malformed catalog yields an
+// empty map.
 func readCatalogFile(installLocation string) map[string]string {
 	byName := map[string]string{}
 	if installLocation == "" {

@@ -3,8 +3,11 @@
 package config
 
 import (
+	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,8 +39,16 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read config %s: %w", path, err)
 	}
+	// Strict decoding: an unknown key (e.g. `profile:` instead of `profiles:`)
+	// would otherwise parse to an empty Config and silently fall back to
+	// auto-discovery, hiding the typo.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := dec.Decode(&cfg); err != nil {
+		if errors.Is(err, io.EOF) { // empty file
+			return Config{}, nil
+		}
 		return Config{}, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	return cfg, nil
@@ -59,7 +70,7 @@ func AutoDiscover(homeDir string) ([]Profile, error) {
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		profiles = append(profiles, Profile{Path: path, Label: defaultLabel(path)})
+		profiles = append(profiles, Profile{Path: path, Label: filepath.Base(path)})
 	}
 	return profiles, nil
 }
@@ -95,20 +106,9 @@ func normalize(profiles []Profile, homeDir string) []Profile {
 			continue
 		}
 		seen[path] = struct{}{}
-		out = append(out, Profile{Path: path, Label: cmpLabel(p.Label, path)})
+		out = append(out, Profile{Path: path, Label: cmp.Or(p.Label, filepath.Base(path))})
 	}
 	return out
-}
-
-func cmpLabel(label, path string) string {
-	if label != "" {
-		return label
-	}
-	return defaultLabel(path)
-}
-
-func defaultLabel(path string) string {
-	return filepath.Base(path)
 }
 
 func expandTilde(path, homeDir string) string {

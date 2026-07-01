@@ -43,3 +43,10 @@ behavior.
   still printing valid JSON; parseable object output wins over the exit code.
 - Every UI-fired CLI call carries a timeout (`cmdTimeout` in
   `internal/ui/app.go`) so a hung `claude` degrades to a per-column error.
+- Plugin IDs and MCP server names are third-party data passed to `claude` as
+  positional args; the UI refuses names starting with `-` so they cannot be
+  parsed as CLI flags.
+- Outdated flags use a custom segment-wise numeric version compare in
+  `internal/model` (leading `v` ignored, missing segment = 0, pre-release <
+  release, empty never outdated, lexical fallback for non-numeric segments) —
+  not a semver library, which would reject real-world refs like `1.2.3.4`.

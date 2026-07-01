@@ -16,7 +16,8 @@ rightmost identity column, one row per resource. Two tabs:
   MCP has no update concept; v1 supports viewing and removing servers.
 
 Each profile column header shows the directory path plus the account email and
-subscription plan for that profile.
+subscription plan for that profile. A logged-out profile shows `not logged in`;
+if the auth status cannot be read at all, the line stays blank.
 
 cpm is a thin front end over the public `claude` CLI: all reads use
 `claude ... --json` (except `claude mcp list`, which has no JSON mode and is
@@ -49,7 +50,11 @@ make run     # go run ./cmd/cpm
 ```sh
 cpm                              # auto-discover ~/.claude* profiles
 cpm ~/.claude ~/.claude-work     # show only these profiles, in this order
+cpm -h                           # print usage
 ```
+
+cpm takes no flags other than `-h`/`--help`; any other dashed argument is
+rejected as a typo rather than treated as a profile directory.
 
 On start the table shell renders immediately and every profile column loads in
 parallel (a per-column spinner shows until its data arrives). Loading a profile
@@ -69,7 +74,9 @@ Highest wins; lower tiers are ignored entirely once a higher one is non-empty:
 
 Paths from CLI args and the config file support `~` expansion and are
 de-duplicated (first occurrence wins). If no tier yields a profile, cpm exits
-with an error.
+with an error. Every resolved path must be an existing directory; cpm exits
+with an error otherwise, so typos fail fast instead of surfacing as a column
+error inside the TUI.
 
 ### Config file
 
@@ -88,7 +95,8 @@ profiles:
 - `label` (optional) — column header text; defaults to the path basename.
 
 Profiles are shown in file order. A missing config file is fine (auto-discovery
-kicks in); malformed YAML is an error.
+kicks in); malformed YAML or an unknown key (e.g. `profile:` instead of
+`profiles:`) is an error rather than a silent fallback to auto-discovery.
 
 ### Keybindings
 
@@ -118,7 +126,9 @@ MCP tab:
 | `i` | not supported in v1 — shows a hint to use `claude mcp add` directly |
 
 Action keys are validated against the cell state (e.g. `i` only works where
-the plugin is absent) and show a hint on mismatch. Destructive actions
+the plugin is absent) and show a hint on mismatch. `i` also requires the
+plugin's marketplace to be configured in the target profile; otherwise cpm
+shows a hint to run `claude plugin marketplace add` there first. Destructive actions
 (`x` uninstall/remove) require a `y` confirmation; any other key cancels
 (`ctrl+c` still quits). After an action succeeds, only the affected profile's
 data is reloaded.

@@ -608,19 +608,31 @@ func (m Model) View() string {
 }
 
 // statusLine renders the confirmation prompt when one is pending, otherwise
-// the transient status/error text (possibly empty).
+// the transient status/error text (possibly empty). The text is capped at the
+// terminal width: rowWindow budgets exactly one row for this line, so letting
+// a long CLI error soft-wrap would push the header chrome off-screen.
 func (m Model) statusLine() string {
 	if m.pending != nil {
-		return fmt.Sprintf("%s %s from %s? y/n", m.pending.verb, m.pending.target(),
-			m.columns[m.pending.col].profile.Label)
+		return m.fitWidth(fmt.Sprintf("%s %s from %s? y/n", m.pending.verb,
+			m.pending.target(), m.columns[m.pending.col].profile.Label))
 	}
 	if m.status == "" {
 		return ""
 	}
+	text := m.fitWidth(m.status)
 	if m.statusErr {
-		return errStyle.Render(m.status)
+		return errStyle.Render(text)
 	}
-	return statusStyle.Render(m.status)
+	return statusStyle.Render(text)
+}
+
+// fitWidth truncates s to the terminal width; a no-op before the first
+// WindowSizeMsg arrives.
+func (m Model) fitWidth(s string) string {
+	if m.width <= 0 {
+		return s
+	}
+	return truncate(s, m.width)
 }
 
 // pluginRows builds the comparison matrix from the currently loaded columns;
@@ -637,6 +649,12 @@ func (m Model) pluginMatrix() ([]model.PluginRow, bool) {
 	perProfile := make([]claudecli.PluginData, len(m.columns))
 	perLatest := make([]claudecli.LatestVersions, len(m.columns))
 	for i := range m.columns {
+		// A column that failed to (re)load keeps its previous data but renders
+		// blank cells; feeding that data into the matrix would produce rows
+		// with no visible owner.
+		if m.columns[i].status != statusLoaded {
+			continue
+		}
 		perProfile[i] = m.columns[i].plugins
 		perLatest[i] = m.columns[i].latest
 	}
@@ -669,6 +687,11 @@ func (m Model) viewPlugins() string {
 func (m Model) mcpRows() []model.MCPRow {
 	perProfile := make([][]claudecli.MCPServer, len(m.columns))
 	for i := range m.columns {
+		// Same as pluginMatrix: an errored column renders blank cells, so its
+		// kept data must not generate rows.
+		if m.columns[i].mcpStatus != statusLoaded {
+			continue
+		}
 		perProfile[i] = m.columns[i].mcp
 	}
 	return model.BuildMCPMatrix(perProfile)
@@ -690,7 +713,7 @@ func (m Model) viewMCP() string {
 
 	table := comparisonTable{
 		profiles: make([]tableColumn, len(m.columns)),
-		pinned:   pinnedMCPColumn(rows[start:end]),
+		pinned:   pinnedMCPColumn(rows, start, end),
 		sel:      m.selCol,
 		width:    m.width,
 	}
@@ -913,15 +936,22 @@ func pinnedPluginColumn(rows []model.PluginRow, start, end int, stale bool) tabl
 	return col
 }
 
-// pinnedMCPColumn is the MCP identity column: the server name.
-func pinnedMCPColumn(rows []model.MCPRow) tableColumn {
+// pinnedMCPColumn is the MCP identity column: the server name. Cells cover
+// the vertical window [start, end) but the header is padded to the widest of
+// all rows so the column width does not jump while scrolling.
+func pinnedMCPColumn(rows []model.MCPRow, start, end int) tableColumn {
+	const title = "mcp server"
+	nameW := lipgloss.Width(title)
+	for _, row := range rows {
+		nameW = max(nameW, lipgloss.Width(row.Name))
+	}
 	col := tableColumn{
 		// Two blank lines align the title with the last profile-header line.
-		header: []tableCell{{}, {}, {text: "mcp server", style: labelStyle}},
-		cells:  make([]tableCell, len(rows)),
+		header: []tableCell{{}, {}, {text: padRight(title, nameW), style: labelStyle}},
+		cells:  make([]tableCell, 0, end-start),
 	}
-	for i, row := range rows {
-		col.cells[i] = tableCell{text: row.Name}
+	for _, row := range rows[start:end] {
+		col.cells = append(col.cells, tableCell{text: row.Name})
 	}
 	return col
 }

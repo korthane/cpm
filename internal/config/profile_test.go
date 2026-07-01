@@ -53,6 +53,32 @@ func TestLoadConfig(t *testing.T) {
 			t.Fatal("expected error for unreadable config path")
 		}
 	})
+
+	t.Run("unknown key is an error, not an empty config", func(t *testing.T) {
+		// A typo like `profile:` must not silently fall back to
+		// auto-discovery.
+		path := filepath.Join(t.TempDir(), "typo.yaml")
+		if err := os.WriteFile(path, []byte("profile:\n  - path: ~/.claude\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadConfig(path); err == nil {
+			t.Fatal("expected error for unknown config key")
+		}
+	})
+
+	t.Run("empty file yields empty config", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "empty.yaml")
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(cfg.Profiles) != 0 {
+			t.Fatalf("expected no profiles, got %v", cfg.Profiles)
+		}
+	})
 }
 
 func TestAutoDiscover(t *testing.T) {

@@ -9,6 +9,9 @@ import (
 // FakeRunner is a test double for Runner. It returns canned responses keyed by
 // the space-joined args and records every invocation. It lives outside a
 // _test.go file so tests in other packages (config, ui) can inject it too.
+// Not safe for concurrent use: tests drive Model.Update directly, so commands
+// run sequentially; driving a real tea.Program with it (batched commands run
+// in parallel goroutines) would race on Calls.
 type FakeRunner struct {
 	// Responses maps a space-joined args string to the canned result.
 	Responses map[string]FakeResponse

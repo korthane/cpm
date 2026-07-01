@@ -64,6 +64,19 @@ func TestResolveProfilesRejectsMissingDirectory(t *testing.T) {
 	}
 }
 
+func TestResolveProfilesRejectsFileAsProfile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := resolveProfiles([]string{file})
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("err = %v, want not-a-directory error", err)
+	}
+}
+
 func TestResolveProfilesRejectsMalformedConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

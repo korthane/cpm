@@ -71,6 +71,13 @@ func TestParseMCPListVariedLines(t *testing.T) {
 			in:   "???\nok: cmd - ✔ Connected\n---\n",
 			want: []MCPServer{{Name: "ok", Target: "cmd"}},
 		},
+		{
+			// Pins the last-" - " split: only the status suffix is stripped,
+			// not everything after the first " - " inside the command line.
+			name: "target containing the separator stays intact",
+			in:   "tricky: cmd --flag - value - ✔ Connected\n",
+			want: []MCPServer{{Name: "tricky", Target: "cmd --flag - value"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

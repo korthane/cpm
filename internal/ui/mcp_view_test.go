@@ -7,8 +7,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/korthane/cpm/internal/claudecli"
+	"github.com/korthane/cpm/internal/model"
 )
 
 // mcpRunner extends okRunner with a canned `mcp list` response.
@@ -28,6 +30,24 @@ func switchToMCP(t *testing.T, m Model) (Model, tea.Cmd) {
 		t.Fatalf("tab after switch = %v, want MCP", got.tab)
 	}
 	return got, cmd
+}
+
+func TestPinnedMCPColumnWidthCoversHiddenRows(t *testing.T) {
+	// The header is padded to the widest of ALL rows, not just the visible
+	// window, so the pinned column does not jump while scrolling.
+	rows := []model.MCPRow{
+		{Name: "s"},
+		{Name: "a-much-longer-server-name"},
+	}
+
+	col := pinnedMCPColumn(rows, 0, 1)
+
+	if len(col.cells) != 1 {
+		t.Fatalf("got %d cells, want the visible window only (1)", len(col.cells))
+	}
+	if got, want := lipgloss.Width(col.header[2].text), lipgloss.Width(rows[1].Name); got < want {
+		t.Errorf("header width %d does not cover the widest hidden row (%d)", got, want)
+	}
 }
 
 func TestSwitchToMCPTabFiresLazyLoadPerProfile(t *testing.T) {

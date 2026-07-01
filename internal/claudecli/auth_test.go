@@ -24,6 +24,9 @@ func TestLoadAuthStatus(t *testing.T) {
 		runErr  error
 		want    AuthStatus
 		wantErr bool
+		// wantErrHas pins which error wins when both a runner error and a
+		// parse error are in play.
+		wantErrHas string
 	}{
 		{
 			name:   "logged in fixture",
@@ -80,6 +83,19 @@ func TestLoadAuthStatus(t *testing.T) {
 			stdout:  []byte("null"),
 			wantErr: true,
 		},
+		{
+			name:       "object-prefixed malformed JSON is a parse error",
+			stdout:     []byte(`{"loggedIn": tru`),
+			wantErr:    true,
+			wantErrHas: "parse auth status",
+		},
+		{
+			name:       "object-prefixed malformed JSON does not mask runner error",
+			stdout:     []byte(`{"loggedIn": tru`),
+			runErr:     errors.New("exit status 1"),
+			wantErr:    true,
+			wantErrHas: "exit status 1",
+		},
 	}
 
 	for _, tt := range tests {
@@ -94,6 +110,9 @@ func TestLoadAuthStatus(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
+				}
+				if tt.wantErrHas != "" && !strings.Contains(err.Error(), tt.wantErrHas) {
+					t.Fatalf("error %q does not contain %q", err, tt.wantErrHas)
 				}
 				return
 			}
