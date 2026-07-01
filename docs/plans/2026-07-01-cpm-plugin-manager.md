@@ -112,7 +112,7 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
 
 - **Language / framework:** Go, **Bubble Tea** (the de-facto standard Go TUI
   framework) with **Lip Gloss** (styling) and **Bubbles** (spinner, key help,
-  viewport). Module path `github.com/olomix/cpm`.
+  viewport). Module path `github.com/korthane/cpm`.
 - **CLI-only backend:** a `claudecli` package wrapping the `claude` binary behind
   a `Runner` interface:
   `Run(ctx, profileDir string, args ...string) ([]byte, error)` — sets
@@ -138,7 +138,7 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
 ## Implementation Steps
 
 ### Task 1: Scaffold the Go project
-- [ ] `git init`; add `.gitignore` (Go); `go mod init github.com/olomix/cpm`
+- [ ] `git init`; add `.gitignore` (Go); `go mod init github.com/korthane/cpm`
 - [ ] add deps: `bubbletea`, `lipgloss`, `bubbles` (+ `teatest` for tests)
 - [ ] create `cmd/cpm/main.go` with a minimal Bubble Tea program that renders a
       placeholder and quits on `q`/`ctrl+c`
