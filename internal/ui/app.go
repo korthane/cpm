@@ -193,6 +193,13 @@ func (m Model) Init() tea.Cmd { return m.loadAll() }
 func (m Model) loadAll() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
 	for i := range m.columns {
+		// A busy column has a mutating claude action in flight; the fresh load
+		// runs `plugin marketplace update` (a write), and two writers on one
+		// config dir can corrupt it. The post-action refresh covers the column
+		// instead. (Init never sees busy columns, so this only gates reloads.)
+		if m.columns[i].busy {
+			continue
+		}
 		m.columns[i].gen++
 		cmds = append(cmds, loadProfile(m.runner, i, m.columns[i].gen, m.columns[i].profile.Path))
 	}
@@ -415,7 +422,10 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "r":
 		// Reload only the active tab's data: the other tab's data stays valid
-		// and MCP reloads are expensive (per-server health checks).
+		// and MCP reloads are expensive (per-server health checks). The MCP
+		// reload is not gated on busy: `mcp list` is read-only, so it cannot
+		// become a second writer, and the post-action reload supersedes it
+		// via the gen stamp anyway.
 		if m.tab == tabMCP {
 			for i := range m.columns {
 				m.columns[i].mcpStatus = statusLoading
@@ -423,7 +433,13 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.loadMCPAll()
 		}
+		// Busy columns keep their state: loadAll skips them (its marketplace
+		// refresh writes to the config dir the in-flight action is mutating),
+		// so marking them loading would leave a spinner nothing feeds.
 		for i := range m.columns {
+			if m.columns[i].busy {
+				continue
+			}
 			m.columns[i].status = statusLoading
 			m.columns[i].err = nil
 		}

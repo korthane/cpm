@@ -297,6 +297,37 @@ func TestSecondActionBlockedWhileActionInFlight(t *testing.T) {
 	}
 }
 
+func TestReloadSkipsBusyColumn(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, installedFoo(true), installedFoo(true))
+
+	// Start an update on p0; its command is not executed, so the action is
+	// still in flight when reload is pressed.
+	m, cmd := press(t, m, "u")
+	if cmd == nil {
+		t.Fatal("update produced no command")
+	}
+	if !m.columns[0].busy {
+		t.Fatal("column 0 not busy after starting the action")
+	}
+
+	// Reload must not fire a fresh load for the busy column: its marketplace
+	// refresh writes to the config dir the in-flight action is mutating.
+	m, _ = press(t, m, "r")
+	if m.columns[0].status != statusLoaded {
+		t.Errorf("busy column status = %v, want statusLoaded (reload must skip it)", m.columns[0].status)
+	}
+	if m.columns[0].gen != 0 {
+		t.Errorf("busy column gen = %d, want 0 (no load fired)", m.columns[0].gen)
+	}
+	if m.columns[1].status != statusLoading {
+		t.Errorf("idle column status = %v, want statusLoading", m.columns[1].status)
+	}
+	if m.columns[1].gen != 1 {
+		t.Errorf("idle column gen = %d, want 1", m.columns[1].gen)
+	}
+}
+
 func TestSupersededLoadResultDropped(t *testing.T) {
 	m := modelWithCells(t, &claudecli.FakeRunner{}, installedFoo(true))
 

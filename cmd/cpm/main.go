@@ -74,7 +74,10 @@ func resolveProfiles(cliArgs []string) ([]config.Profile, error) {
 		}
 	}
 
-	profiles := config.ResolveProfiles(cliArgs, cfg, discovered, home)
+	profiles, err := config.ResolveProfiles(cliArgs, cfg, discovered, home)
+	if err != nil {
+		return nil, err
+	}
 	if len(profiles) == 0 {
 		return nil, errors.New("no profiles found: pass directories as arguments " +
 			"or configure ~/.config/cpm/config.yaml")

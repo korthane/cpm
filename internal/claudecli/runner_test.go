@@ -188,3 +188,35 @@ func TestRealRunnerKillsHungProcess(t *testing.T) {
 		t.Fatalf("run took %v, the process was not killed on timeout", elapsed)
 	}
 }
+
+func TestRealRunnerTimeoutSurvivesPipeHoldingGrandchild(t *testing.T) {
+	// The timeout kill reaches only the direct child; a grandchild that
+	// inherited the stdout pipe (stdio MCP server, git) would keep Run
+	// blocked until it exits unless WaitDelay closes the pipes. The ready
+	// file gates the kill: cancelling on a fixed timer can fire before the
+	// stub has spawned the grandchild, which would pass without WaitDelay.
+	ready := filepath.Join(t.TempDir(), "ready")
+	stub := writeScript(t, "#!/bin/sh\nsleep 30 &\ntouch "+ready+"\nwait\n")
+	r := &realRunner{binary: stub, waitDelay: 100 * time.Millisecond}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		for ctx.Err() == nil {
+			if _, err := os.Stat(ready); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	start := time.Now()
+	_, err := r.Run(ctx, "", "anything")
+	if err == nil {
+		t.Fatal("expected error from a killed run, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("run took %v, the orphaned pipe holder blocked Wait", elapsed)
+	}
+}

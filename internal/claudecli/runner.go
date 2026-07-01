@@ -4,12 +4,14 @@ package claudecli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Runner executes the claude CLI against a specific profile directory.
@@ -46,6 +48,9 @@ func (e *RunError) Unwrap() error { return e.Err }
 type realRunner struct {
 	// binary is the executable to run; defaults to "claude".
 	binary string
+	// waitDelay overrides the post-kill wait bound (see Run); zero means the
+	// 5s default. Only tests set it.
+	waitDelay time.Duration
 }
 
 // NewRunner returns a Runner backed by the real `claude` CLI on PATH.
@@ -55,6 +60,12 @@ func NewRunner() Runner {
 
 func (r *realRunner) Run(ctx context.Context, profileDir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, r.binary, args...)
+	// On timeout CommandContext kills only claude itself, but its children
+	// (stdio MCP servers spawned by `mcp list`, git spawned by `marketplace
+	// update`) inherit the stdout/stderr pipes and would keep cmd.Run blocked
+	// until they exit — defeating the very timeout the UI relies on. WaitDelay
+	// forces the pipes closed shortly after the kill so Run returns an error.
+	cmd.WaitDelay = cmp.Or(r.waitDelay, 5*time.Second)
 	if profileDir != "" {
 		cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+profileDir)
 	}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -119,7 +120,10 @@ func TestResolveProfiles(t *testing.T) {
 	}
 
 	t.Run("cli args win and restrict to exactly the given set", func(t *testing.T) {
-		got := ResolveProfiles([]string{"~/.claude", "/abs/other"}, cfg, discovered, home)
+		got, err := ResolveProfiles([]string{"~/.claude", "/abs/other"}, cfg, discovered, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		want := []Profile{
 			{Path: "/home/tester/.claude", Label: ".claude"},
 			{Path: "/abs/other", Label: "other"},
@@ -130,7 +134,10 @@ func TestResolveProfiles(t *testing.T) {
 	})
 
 	t.Run("config wins over discovery when no cli args", func(t *testing.T) {
-		got := ResolveProfiles(nil, cfg, discovered, home)
+		got, err := ResolveProfiles(nil, cfg, discovered, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		want := []Profile{
 			{Path: "/home/tester/.claude", Label: "cfg-personal"},
 			{Path: "/home/tester/.claude-work", Label: ".claude-work"},
@@ -141,14 +148,20 @@ func TestResolveProfiles(t *testing.T) {
 	})
 
 	t.Run("auto-discovery when no cli args and empty config", func(t *testing.T) {
-		got := ResolveProfiles(nil, Config{}, discovered, home)
+		got, err := ResolveProfiles(nil, Config{}, discovered, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if !reflect.DeepEqual(got, discovered) {
 			t.Fatalf("got %+v, want %+v", got, discovered)
 		}
 	})
 
 	t.Run("dedup preserves first occurrence and order", func(t *testing.T) {
-		got := ResolveProfiles([]string{"~/.claude", "/home/tester/.claude", "~/.other"}, cfg, discovered, home)
+		got, err := ResolveProfiles([]string{"~/.claude", "/home/tester/.claude", "~/.other"}, cfg, discovered, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		want := []Profile{
 			{Path: "/home/tester/.claude", Label: ".claude"},
 			{Path: "/home/tester/.other", Label: ".other"},
@@ -160,20 +173,63 @@ func TestResolveProfiles(t *testing.T) {
 
 	t.Run("dedup collapses path variants of one directory", func(t *testing.T) {
 		// Two columns for one config dir would mutate it concurrently.
-		got := ResolveProfiles(
+		got, err := ResolveProfiles(
 			[]string{"~/.claude", "/home/tester/.claude/", "/home/tester/.claude-x/../.claude"},
 			cfg, discovered, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		want := []Profile{{Path: "/home/tester/.claude", Label: ".claude"}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %+v, want %+v", got, want)
 		}
 	})
 
+	t.Run("dedup collapses a symlink to an already-listed dir", func(t *testing.T) {
+		dir := t.TempDir()
+		realDir := filepath.Join(dir, "claude")
+		mustMkdir(t, realDir)
+		link := filepath.Join(dir, "claude-link")
+		if err := os.Symlink(realDir, link); err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveProfiles([]string{realDir, link}, Config{}, nil, dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []Profile{{Path: realDir, Label: "claude"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
 	t.Run("bare tilde expands to home", func(t *testing.T) {
-		got := ResolveProfiles([]string{"~"}, Config{}, nil, home)
+		got, err := ResolveProfiles([]string{"~"}, Config{}, nil, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		want := []Profile{{Path: "/home/tester", Label: "tester"}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("empty cli arg is an error, not the current directory", func(t *testing.T) {
+		// filepath.Clean("") is "." — an empty path must not silently make
+		// cpm mutate a config dir rooted at the cwd.
+		if _, err := ResolveProfiles([]string{""}, Config{}, nil, home); err == nil {
+			t.Fatal("expected error for an empty cli path")
+		}
+	})
+
+	t.Run("config entry without a path is an error naming its label", func(t *testing.T) {
+		cfg := Config{Profiles: []Profile{{Label: "work"}}}
+		_, err := ResolveProfiles(nil, cfg, nil, home)
+		if err == nil {
+			t.Fatal("expected error for a config entry without a path")
+		}
+		if !strings.Contains(err.Error(), "work") {
+			t.Fatalf("err = %v, want it to name the entry's label", err)
 		}
 	})
 }

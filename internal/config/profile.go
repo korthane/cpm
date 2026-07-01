@@ -79,8 +79,8 @@ func AutoDiscover(homeDir string) ([]Profile, error) {
 // cliArgs win, else a non-empty config, else the discovered profiles. Paths from
 // cliArgs and config have ~ expanded against homeDir and are de-duplicated by
 // resolved path, preserving first-seen order; labels default to the path
-// basename when unset.
-func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir string) []Profile {
+// basename when unset. An empty path is an error.
+func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir string) ([]Profile, error) {
 	switch {
 	case len(cliArgs) > 0:
 		profiles := make([]Profile, len(cliArgs))
@@ -91,26 +91,45 @@ func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir
 	case len(cfg.Profiles) > 0:
 		return normalize(cfg.Profiles, homeDir)
 	default:
-		return discovered
+		return discovered, nil
 	}
 }
 
 // normalize expands ~, fills default labels, and de-dups by resolved path while
-// preserving order. Paths are cleaned before de-duping so variants like
-// `~/.claude` and `~/.claude/` cannot become two columns independently
-// mutating one config dir.
-func normalize(profiles []Profile, homeDir string) []Profile {
+// preserving order. Paths are cleaned and symlink-resolved before de-duping so
+// variants like `~/.claude`, `~/.claude/`, or a symlink to it cannot become two
+// columns independently mutating one config dir.
+func normalize(profiles []Profile, homeDir string) ([]Profile, error) {
 	seen := make(map[string]struct{}, len(profiles))
 	out := make([]Profile, 0, len(profiles))
 	for _, p := range profiles {
+		if p.Path == "" {
+			// filepath.Clean("") is "." — a blank CLI arg or a config entry
+			// missing `path` would otherwise silently target the current
+			// directory as a config dir.
+			if p.Label != "" {
+				return nil, fmt.Errorf("profile %q has an empty path", p.Label)
+			}
+			return nil, errors.New("empty profile path")
+		}
 		path := filepath.Clean(expandTilde(p.Path, homeDir))
-		if _, dup := seen[path]; dup {
+		if _, dup := seen[dedupKey(path)]; dup {
 			continue
 		}
-		seen[path] = struct{}{}
+		seen[dedupKey(path)] = struct{}{}
 		out = append(out, Profile{Path: path, Label: cmp.Or(p.Label, filepath.Base(path))})
 	}
-	return out
+	return out, nil
+}
+
+// dedupKey resolves symlinks so a symlinked alias of an already-listed config
+// dir cannot become a second column; a path that does not resolve (e.g. does
+// not exist) falls back to its cleaned form.
+func dedupKey(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 func expandTilde(path, homeDir string) string {
