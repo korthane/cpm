@@ -58,14 +58,20 @@ func resolveProfiles(cliArgs []string) ([]config.Profile, error) {
 		return nil, fmt.Errorf("resolve home dir: %w", err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(home, ".config", "cpm", "config.yaml"))
-	if err != nil {
-		return nil, err
-	}
-
-	discovered, err := config.AutoDiscover(home)
-	if err != nil {
-		return nil, err
+	// CLI args take full precedence, so a broken config file or a discovery
+	// failure must not block an explicit `cpm <dir>` invocation that would
+	// ignore both anyway.
+	var cfg config.Config
+	var discovered []config.Profile
+	if len(cliArgs) == 0 {
+		cfg, err = config.LoadConfig(filepath.Join(home, ".config", "cpm", "config.yaml"))
+		if err != nil {
+			return nil, err
+		}
+		discovered, err = config.AutoDiscover(home)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	profiles := config.ResolveProfiles(cliArgs, cfg, discovered, home)

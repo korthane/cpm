@@ -32,7 +32,9 @@ type RunError struct {
 
 func (e *RunError) Error() string {
 	msg := fmt.Sprintf("claude %s: %v", strings.Join(e.Args, " "), e.Err)
-	if s := strings.TrimSpace(e.Stderr); s != "" {
+	// The message renders inside single-line table cells; collapse interior
+	// newlines and whitespace runs so multi-line stderr cannot split a row.
+	if s := strings.Join(strings.Fields(e.Stderr), " "); s != "" {
 		msg += ": " + s
 	}
 	return msg

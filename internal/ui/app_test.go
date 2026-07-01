@@ -186,18 +186,25 @@ func TestLoadErrorProducesErrMsg(t *testing.T) {
 
 func TestAuthFailureDegradesToBlankHeader(t *testing.T) {
 	runner := okRunner()
-	runner.Responses["auth status --json"] = claudecli.FakeResponse{Err: errors.New("logged out")}
+	runner.Responses["auth status --json"] = claudecli.FakeResponse{Err: errors.New("auth read failed")}
 	m := New(runner, testProfiles[:1])
 
+	loaded := false
 	for _, msg := range drain(t, m.Init()) {
-		if loaded, ok := msg.(profileLoadedMsg); ok {
-			if loaded.auth.Email != "" {
-				t.Errorf("auth email = %q, want empty on auth failure", loaded.auth.Email)
-			}
-			return
+		if _, ok := msg.(profileLoadedMsg); ok {
+			loaded = true
 		}
+		updated, _ := m.Update(msg)
+		m = updated.(Model)
 	}
-	t.Fatal("auth failure should not fail the column load; no profileLoadedMsg produced")
+	if !loaded {
+		t.Fatal("auth failure should not fail the column load; no profileLoadedMsg produced")
+	}
+	// A failed auth read is not the same as a logged-out account: the header
+	// must stay blank rather than claim "not logged in".
+	if view := m.View(); strings.Contains(view, "not logged in") {
+		t.Errorf("auth failure rendered as logged-out header:\n%s", view)
+	}
 }
 
 func TestProfileLoadedFlipsOnlyThatColumn(t *testing.T) {

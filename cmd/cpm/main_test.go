@@ -80,3 +80,26 @@ func TestResolveProfilesRejectsMalformedConfig(t *testing.T) {
 		t.Fatal("resolveProfiles with malformed config returned no error")
 	}
 }
+
+func TestResolveProfilesArgsIgnoreMalformedConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".config", "cpm")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("profiles: ["), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// CLI args win the precedence, so the (ignored) broken config must not
+	// block an explicit invocation.
+	p := t.TempDir()
+	profiles, err := resolveProfiles([]string{p})
+	if err != nil {
+		t.Fatalf("resolveProfiles: %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].Path != p {
+		t.Fatalf("profiles = %+v, want just %s", profiles, p)
+	}
+}

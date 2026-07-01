@@ -209,7 +209,8 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   adds `ListMarketplaces` (`plugin marketplace list --json` →
   `[]Marketplace{Name, InstallLocation}`) with its own fixture + tests;
   `RefreshMarketplaces`/`ResolveLatestVersions` take a `profileDir` (catalogs
-  are per profile), refining the plan's parameterless signature
+  are per profile), refining the plan's parameterless signature; Task 13 later
+  folded both into `claudecli.LoadPluginsFresh`, the sole entry point
 
 ### Task 7: Aggregate plugins into a comparison matrix
 - [x] implement `BuildPluginMatrix(profiles, perProfilePluginData, latestVersions)`
@@ -329,8 +330,9 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   pinned latest versions still came from the cached `--available` union, not
   the fresh resolver. Closed it: profile loads now go through a new
   `claudecli.LoadPluginsFresh` (marketplace refresh + plugin data + resolved
-  latest versions in one `plugin list` spawn; `ResolveLatestVersions`
-  delegates to it), `model.LatestVersions` is replaced by
+  latest versions in one `plugin list` spawn; the Task 6 helpers
+  `RefreshMarketplaces`/`ResolveLatestVersions` were folded into it and
+  removed), `model.LatestVersions` is replaced by
   `model.MergeLatestVersions` over the per-profile resolved maps, and a
   failed refresh renders the pinned header as `latest (stale)`. Coverage:
   claudecli 96.3%, config 95.6%, model 98.3% (ui 98.0%; `cmd/cpm` is entry

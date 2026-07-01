@@ -136,6 +136,26 @@ func TestRealRunnerSurfacesNonZeroExitAndStderr(t *testing.T) {
 	}
 }
 
+func TestRunErrorCollapsesMultiLineStderr(t *testing.T) {
+	err := &RunError{
+		Args:   []string{"plugin", "list"},
+		Stderr: "Error: fetch failed\n  at https://example.com\n\nretry later\n",
+		Err:    errors.New("exit status 1"),
+	}
+
+	msg := err.Error()
+	// The message ends up in single-line table cells; an embedded newline
+	// would split a rendered row.
+	if strings.ContainsAny(msg, "\n\r") {
+		t.Errorf("Error() = %q, want no newlines", msg)
+	}
+	for _, want := range []string{"fetch failed", "retry later"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("Error() = %q, want it to contain %q", msg, want)
+		}
+	}
+}
+
 func TestRealRunnerHonorsCancelledContext(t *testing.T) {
 	stub := writeScript(t, "#!/bin/sh\nsleep 30\n")
 	r := &realRunner{binary: stub}

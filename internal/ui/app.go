@@ -18,9 +18,10 @@ import (
 	"github.com/korthane/cpm/internal/model"
 )
 
-// cmdTimeout bounds every claude invocation fired from the UI: marketplace
-// update hits the network and mcp list health-checks every server, so a hung
-// CLI must degrade to the column's error state instead of spinning forever.
+// cmdTimeout bounds each UI-fired command (one shared context per tea.Cmd, so
+// a load's whole CLI sequence draws from one budget): marketplace update hits
+// the network and mcp list health-checks every server, so a hung CLI must
+// degrade to the column's error state instead of spinning forever.
 const cmdTimeout = 2 * time.Minute
 
 type tab int
@@ -56,6 +57,10 @@ type column struct {
 	profile config.Profile
 	status  loadStatus
 	auth    claudecli.AuthStatus
+	// authErr marks a failed auth read; the header degrades to blank instead
+	// of claiming "not logged in", which auth alone can't distinguish from a
+	// transient failure.
+	authErr error
 	plugins claudecli.PluginData
 	// latest carries the profile's freshly resolved latest versions (its
 	// marketplaces are re-fetched on every load; Stale marks a failed fetch).
@@ -128,6 +133,7 @@ func New(r claudecli.Runner, profiles []config.Profile) Model {
 type profileLoadedMsg struct {
 	index   int
 	auth    claudecli.AuthStatus
+	authErr error
 	plugins claudecli.PluginData
 	latest  claudecli.LatestVersions
 }
@@ -211,10 +217,12 @@ func loadProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
 		if err != nil {
 			return profileErrMsg{index: index, err: err}
 		}
-		// A failed auth read (e.g. logged-out profile) degrades to a blank
-		// header instead of failing the whole column.
-		auth, _ := claudecli.LoadAuthStatus(ctx, r, profileDir)
-		return profileLoadedMsg{index: index, auth: auth, plugins: plugins, latest: latest}
+		// A failed auth read degrades to a blank header instead of failing
+		// the whole column. (A logged-out profile is not a failure: the CLI
+		// still prints parseable JSON with loggedIn=false.)
+		auth, authErr := claudecli.LoadAuthStatus(ctx, r, profileDir)
+		return profileLoadedMsg{index: index, auth: auth, authErr: authErr,
+			plugins: plugins, latest: latest}
 	}
 }
 
@@ -234,6 +242,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col := &m.columns[msg.index]
 		col.status = statusLoaded
 		col.auth = msg.auth
+		col.authErr = msg.authErr
 		col.plugins = msg.plugins
 		col.latest = msg.latest
 		col.err = nil
@@ -807,6 +816,9 @@ func (c *column) mcpBodyCell(cell model.MCPCell) tableCell {
 func (c *column) statusCell(spin string) tableCell {
 	switch c.status {
 	case statusLoaded:
+		if c.authErr != nil {
+			return tableCell{}
+		}
 		if !c.auth.LoggedIn {
 			return tableCell{text: "not logged in", style: pathStyle}
 		}
