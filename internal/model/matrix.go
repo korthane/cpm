@@ -81,6 +81,25 @@ func BuildPluginMatrix(perProfile []claudecli.PluginData, latest map[claudecli.P
 	return rows
 }
 
+// LatestVersions unions the per-profile catalog views into one latest-version
+// map for BuildPluginMatrix. Profiles refresh their catalogs independently, so
+// the same plugin can carry different versions; the newest one wins. Empty
+// versions never overwrite a known one.
+func LatestVersions(perProfile []claudecli.PluginData) map[claudecli.PluginID]string {
+	latest := map[claudecli.PluginID]string{}
+	for _, data := range perProfile {
+		for _, a := range data.Available {
+			if a.LatestVersion == "" {
+				continue
+			}
+			if cur, ok := latest[a.ID]; !ok || versionLess(cur, a.LatestVersion) {
+				latest[a.ID] = a.LatestVersion
+			}
+		}
+	}
+	return latest
+}
+
 // versionLess reports whether version a is strictly older than b. Unknown
 // versions (either side empty) are never considered outdated. A leading "v"
 // is ignored so an installed "1.5.5" matches a catalog tag "v1.5.5".

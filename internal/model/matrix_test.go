@@ -1,6 +1,7 @@
 package model
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/korthane/cpm/internal/claudecli"
@@ -163,5 +164,72 @@ func TestBuildPluginMatrixNoInstalledPlugins(t *testing.T) {
 func TestBuildPluginMatrixEmptyInput(t *testing.T) {
 	if rows := BuildPluginMatrix(nil, nil); len(rows) != 0 {
 		t.Fatalf("got %d rows, want 0", len(rows))
+	}
+}
+
+func TestLatestVersionsUnionAcrossProfiles(t *testing.T) {
+	perProfile := []claudecli.PluginData{
+		{Available: []claudecli.AvailablePlugin{
+			{ID: id("a", "m"), LatestVersion: "1.0.0"},
+		}},
+		{Available: []claudecli.AvailablePlugin{
+			{ID: id("b", "m"), LatestVersion: "2.0.0"},
+		}},
+	}
+
+	got := LatestVersions(perProfile)
+
+	want := map[claudecli.PluginID]string{
+		id("a", "m"): "1.0.0",
+		id("b", "m"): "2.0.0",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d entries, want %d", len(got), len(want))
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("latest[%v] = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestLatestVersionsNewestWinsOnDisagreement(t *testing.T) {
+	// Profiles refresh their catalogs at different times, so the same plugin
+	// can carry different latest versions; the newest one wins either way
+	// round, including numeric (not lexical) segment ordering.
+	perProfile := []claudecli.PluginData{
+		{Available: []claudecli.AvailablePlugin{
+			{ID: id("p", "m"), LatestVersion: "1.10.0"},
+		}},
+		{Available: []claudecli.AvailablePlugin{
+			{ID: id("p", "m"), LatestVersion: "1.9.0"},
+		}},
+	}
+
+	if got := LatestVersions(perProfile)[id("p", "m")]; got != "1.10.0" {
+		t.Errorf("latest = %q, want 1.10.0", got)
+	}
+
+	slices.Reverse(perProfile)
+	if got := LatestVersions(perProfile)[id("p", "m")]; got != "1.10.0" {
+		t.Errorf("latest after reverse = %q, want 1.10.0", got)
+	}
+}
+
+func TestLatestVersionsIgnoresEmpty(t *testing.T) {
+	perProfile := []claudecli.PluginData{
+		{Available: []claudecli.AvailablePlugin{
+			{ID: id("p", "m"), LatestVersion: "1.0.0"},
+		}},
+		{Available: []claudecli.AvailablePlugin{
+			{ID: id("p", "m"), LatestVersion: ""},
+		}},
+	}
+
+	if got := LatestVersions(perProfile)[id("p", "m")]; got != "1.0.0" {
+		t.Errorf("latest = %q, want 1.0.0 (empty must not overwrite)", got)
+	}
+	if got := LatestVersions(nil); len(got) != 0 {
+		t.Errorf("LatestVersions(nil) = %v, want empty", got)
 	}
 }

@@ -244,17 +244,23 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
   degrades to a blank header instead of failing the column
 
 ### Task 9: Plugin table view — pinned column, headers, horizontal scroll
-- [ ] render header row: per profile show `label / path`, `email`, `plan`; pinned
+- [x] render header row: per profile show `label / path`, `email`, `plan`; pinned
       right header = `plugin@marketplace  latest`
-- [ ] render body: one row per matrix row; cells show version / `disabled
+- [x] render body: one row per matrix row; cells show version / `disabled
       (vX.Y.Z)` / `—`; outdated cells styled; pinned right column always drawn
-- [ ] implement horizontal scroll over the N−1 profile columns (◀/▶ keys) while
+- [x] implement horizontal scroll over the N−1 profile columns (◀/▶ keys) while
       keeping the rightmost identity column pinned; show scroll indicators
-- [ ] per-column spinner rendered for columns still loading
-- [ ] write tests: rendered output contains pinned column at all scroll offsets;
+- [x] per-column spinner rendered for columns still loading
+- [x] write tests: rendered output contains pinned column at all scroll offsets;
       disabled/absent/outdated cells formatted correctly (golden strings)
-- [ ] write tests: scrolling changes visible left columns but never the pinned one
-- [ ] run tests + lint — must pass before Task 10
+- [x] write tests: scrolling changes visible left columns but never the pinned one
+- [x] run tests + lint — must pass before Task 10
+- ➕ discovered: the renderer is a generic `comparisonTable` (header lines +
+  cells + pinned column) in `internal/ui/table.go` so Task 11 can reuse it for
+  MCP; the pinned `latest` values currently come from a new pure helper
+  `model.LatestVersions` (union of per-profile `--available` catalogs, newest
+  wins) — wiring the fresh `ResolveLatestVersions` refresh + stale flag into
+  the load path remains open and is verified/closed by Task 13
 
 ### Task 10: Plugin actions (enable/disable/uninstall/update/install)
 - [ ] row/cell selection + an action menu (keys: `e` enable, `d` disable, `u`
