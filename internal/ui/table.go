@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // tableCell is one pre-formatted cell. The style is applied after padding is
@@ -76,8 +77,11 @@ func (t comparisonTable) render() string {
 	leftHidden := start > 0
 	rightHidden := visible[len(visible)-1] < len(t.profiles)-1
 
+	// Indexing headers and cells by the pinned column's counts relies on the
+	// tableColumn invariant: every column carries the same number of header
+	// lines and rows.
 	var b strings.Builder
-	for line := range headerLineCount(t) {
+	for line := range len(t.pinned.header) {
 		left, right := "  ", "  "
 		// Indicators live on the first header line only.
 		if line == 0 && leftHidden {
@@ -87,13 +91,13 @@ func (t comparisonTable) render() string {
 			right = " ▶"
 		}
 		t.writeLine(&b, visible, widths, used, pinnedW, left, right,
-			func(c tableColumn) tableCell { return lineAt(c.header, line) })
+			func(c tableColumn) tableCell { return c.header[line] })
 	}
 	b.WriteString(strings.Repeat("─", min(width, used+2*gutterWidth+lipgloss.Width(pinnedSeparator)+pinnedW)))
 	b.WriteByte('\n')
 	for row := range len(t.pinned.cells) {
 		t.writeLine(&b, visible, widths, used, pinnedW, "  ", "  ",
-			func(c tableColumn) tableCell { return lineAt(c.cells, row) })
+			func(c tableColumn) tableCell { return c.cells[row] })
 	}
 	return b.String()
 }
@@ -139,21 +143,6 @@ func (t comparisonTable) writeLine(b *strings.Builder, visible, widths []int, us
 	b.WriteByte('\n')
 }
 
-func headerLineCount(t comparisonTable) int {
-	lines := len(t.pinned.header)
-	for _, c := range t.profiles {
-		lines = max(lines, len(c.header))
-	}
-	return lines
-}
-
-func lineAt(cells []tableCell, i int) tableCell {
-	if i < len(cells) {
-		return cells[i]
-	}
-	return tableCell{}
-}
-
 func columnWidth(c tableColumn, minW int) int {
 	w := minW
 	for _, cell := range c.header {
@@ -178,24 +167,11 @@ func padRight(s string, w int) string {
 }
 
 // truncate shortens s to at most w display cells, ending in an ellipsis when
-// it had to cut.
+// it had to cut. ansi.Truncate is grapheme-aware, so combining marks and emoji
+// ZWJ sequences are not split mid-cluster.
 func truncate(s string, w int) string {
-	if lipgloss.Width(s) <= w {
-		return s
-	}
 	if w <= 0 {
 		return ""
 	}
-	var b strings.Builder
-	used := 0
-	for _, r := range s {
-		rw := lipgloss.Width(string(r))
-		if used+rw > w-1 {
-			break
-		}
-		b.WriteRune(r)
-		used += rw
-	}
-	b.WriteRune('…')
-	return b.String()
+	return ansi.Truncate(s, w, "…")
 }

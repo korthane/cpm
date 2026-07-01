@@ -3,6 +3,8 @@
 package claudecli
 
 import (
+	"errors"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -15,6 +17,14 @@ func setProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		// Cancel only runs after Start succeeds, so Process is non-nil.
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			// The group exited on its own between the deadline firing and the
+			// kill. Report ErrProcessDone (as the default cancel does): any
+			// other error from Cancel makes Wait fail a run that may have
+			// completed successfully at the exact timeout boundary.
+			return os.ErrProcessDone
+		}
+		return err
 	}
 }

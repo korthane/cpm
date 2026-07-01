@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -107,9 +109,10 @@ func TestActionKeysInvokeCorrectCLI(t *testing.T) {
 			if cmd == nil {
 				t.Fatalf("key %q produced no command", tt.key)
 			}
-			msg, ok := cmd().(actionDoneMsg)
+			raw := cmd()
+			msg, ok := raw.(actionDoneMsg)
 			if !ok {
-				t.Fatalf("command produced %T, want actionDoneMsg", cmd())
+				t.Fatalf("command produced %T, want actionDoneMsg", raw)
 			}
 			if msg.err != nil {
 				t.Fatalf("action failed: %v", msg.err)
@@ -217,6 +220,81 @@ func TestActionTimeoutRefreshesProfile(t *testing.T) {
 	}
 	if view := got.View(); !strings.Contains(view, "failed") {
 		t.Errorf("failure status missing:\n%s", view)
+	}
+}
+
+// ctxWaitRunner blocks until the command context expires and returns its
+// error, simulating a hung claude killed by the timeout.
+type ctxWaitRunner struct{}
+
+func (ctxWaitRunner) Run(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestActionCommandsDeriveUncertainFromTimeout(t *testing.T) {
+	// uncertain must come from the command's own expired context, not merely
+	// from a failed CLI call — this drives the real derivation, unlike the
+	// *TimeoutRefreshesProfile tests which inject the flag.
+	old := cmdTimeout
+	cmdTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { cmdTimeout = old })
+
+	plugin, ok := runPluginAction(ctxWaitRunner{}, 0, "/h/p0", fooID, "update")().(actionDoneMsg)
+	if !ok || plugin.err == nil || !plugin.uncertain {
+		t.Errorf("timed-out plugin action = %+v, want err and uncertain", plugin)
+	}
+	mcp, ok := runMCPRemove(ctxWaitRunner{}, 0, "/h/p0", "exa")().(mcpActionDoneMsg)
+	if !ok || mcp.err == nil || !mcp.uncertain {
+		t.Errorf("timed-out MCP remove = %+v, want err and uncertain", mcp)
+	}
+}
+
+func TestActionCommandsPlainFailureIsNotUncertain(t *testing.T) {
+	// A CLI-reported failure changed nothing; flagging it uncertain would
+	// trigger a spurious column reload after every failed action.
+	runner := &claudecli.FakeRunner{Default: claudecli.FakeResponse{Err: errors.New("boom")}}
+
+	plugin := runPluginAction(runner, 0, "/h/p0", fooID, "update")().(actionDoneMsg)
+	if plugin.err == nil || plugin.uncertain {
+		t.Errorf("failed plugin action = %+v, want err and not uncertain", plugin)
+	}
+	mcp := runMCPRemove(runner, 0, "/h/p0", "exa")().(mcpActionDoneMsg)
+	if mcp.err == nil || mcp.uncertain {
+		t.Errorf("failed MCP remove = %+v, want err and not uncertain", mcp)
+	}
+}
+
+// deadlineCheckRunner records each call and whether its context carried a
+// deadline.
+type deadlineCheckRunner struct {
+	calls   int
+	missing []string
+}
+
+func (r *deadlineCheckRunner) Run(ctx context.Context, _ string, args ...string) ([]byte, error) {
+	r.calls++
+	if _, ok := ctx.Deadline(); !ok {
+		r.missing = append(r.missing, strings.Join(args, " "))
+	}
+	return nil, nil
+}
+
+func TestEveryUIFiredCommandCarriesTimeout(t *testing.T) {
+	// A hung claude must degrade to a per-column error; a command constructor
+	// losing its context.WithTimeout would freeze that column forever.
+	r := &deadlineCheckRunner{}
+	loadProfile(r, 0, 1, "/h/p0")()
+	refreshProfile(r, 0, 1, "/h/p0", false)()
+	loadMCPProfile(r, 0, 1, "/h/p0")()
+	runPluginAction(r, 0, "/h/p0", fooID, "update")()
+	runMCPRemove(r, 0, "/h/p0", "exa")()
+
+	if r.calls == 0 {
+		t.Fatal("no CLI calls recorded")
+	}
+	if len(r.missing) != 0 {
+		t.Errorf("CLI calls fired without a deadline: %v", r.missing)
 	}
 }
 
@@ -426,6 +504,48 @@ func TestSupersededLoadResultDropped(t *testing.T) {
 	}
 }
 
+func TestSupersededErrResultDropped(t *testing.T) {
+	m := modelWithCells(t, &claudecli.FakeRunner{}, installedFoo(true))
+
+	// Reload supersedes the initial generation; an error stamped with the old
+	// generation must not flip a reloading column into the error state.
+	m, _ = press(t, m, "r")
+	updated, _ := m.Update(profileErrMsg{index: 0, gen: 0, err: errors.New("stale boom")})
+	got := updated.(Model)
+
+	if got.columns[0].status != statusLoading {
+		t.Errorf("column status = %v, want loading (stale error dropped)", got.columns[0].status)
+	}
+	if got.columns[0].err != nil {
+		t.Errorf("stale error stored on the column: %v", got.columns[0].err)
+	}
+}
+
+func TestUpClampsAfterRowSetShrinks(t *testing.T) {
+	installed := make([]claudecli.InstalledPlugin, 5)
+	for i := range installed {
+		installed[i] = claudecli.InstalledPlugin{
+			ID:      claudecli.PluginID{Name: fmt.Sprintf("plug%d", i), Marketplace: "mp"},
+			Version: "1.0.0", Enabled: true,
+		}
+	}
+	m := modelWithCells(t, &claudecli.FakeRunner{}, claudecli.PluginData{Installed: installed})
+	for range 4 {
+		m, _ = press(t, m, "down")
+	}
+
+	// A reload delivers a shrunken row set under the out-of-range selection;
+	// `up` must clamp before moving, not walk back one dead press at a time.
+	m, _ = press(t, m, "r")
+	updated, _ := m.Update(profileLoadedMsg{index: 0, gen: m.columns[0].gen,
+		plugins: claudecli.PluginData{Installed: installed[:2]}})
+	m = updated.(Model)
+
+	if m, _ = press(t, m, "up"); m.selRow != 0 {
+		t.Errorf("selRow after up on a shrunken row set = %d, want 0 (clamped, then moved)", m.selRow)
+	}
+}
+
 func TestActionOnWrongCellStateShowsHint(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, installedFoo(true))
@@ -471,6 +591,26 @@ func TestInstallBlockedWhenMarketplaceMissingInTarget(t *testing.T) {
 	}
 	if view := m.View(); !strings.Contains(view, `marketplace "mp" is not configured`) {
 		t.Errorf("missing-marketplace hint missing:\n%s", view)
+	}
+}
+
+func TestActionOnNonUserScopeShowsHint(t *testing.T) {
+	// Actions pin --scope user; a project/local-scope install (cwd-dependent)
+	// must be refused with a hint instead of the CLI's raw error.
+	data := claudecli.PluginData{
+		Installed: []claudecli.InstalledPlugin{
+			{ID: fooID, Version: "1.0.0", Enabled: true, Scope: "project"},
+		},
+	}
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, data)
+
+	m, cmd := press(t, m, "u")
+	if cmd != nil || len(runner.Calls) != 0 {
+		t.Fatal("action on a project-scope plugin reached the CLI")
+	}
+	if view := m.View(); !strings.Contains(view, "installed at project scope") {
+		t.Errorf("scope hint missing:\n%s", view)
 	}
 }
 

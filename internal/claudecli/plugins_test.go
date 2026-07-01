@@ -47,11 +47,11 @@ func TestLoadPluginsFixture(t *testing.T) {
 	}
 
 	wantInstalled := []InstalledPlugin{
-		{ID: PluginID{Name: "clangd-lsp", Marketplace: "claude-plugins-official"}, Version: "1.0.0", Enabled: true},
+		{ID: PluginID{Name: "clangd-lsp", Marketplace: "claude-plugins-official"}, Version: "1.0.0", Enabled: true, Scope: "user"},
 		// version "unknown" is normalized to empty.
-		{ID: PluginID{Name: "feature-dev", Marketplace: "claude-plugins-official"}, Version: "", Enabled: true},
-		{ID: PluginID{Name: "ralphex", Marketplace: "ralphex"}, Version: "0.17.0", Enabled: true},
-		{ID: PluginID{Name: "superpowers", Marketplace: "claude-plugins-official"}, Version: "6.1.0", Enabled: true},
+		{ID: PluginID{Name: "feature-dev", Marketplace: "claude-plugins-official"}, Version: "", Enabled: true, Scope: "user"},
+		{ID: PluginID{Name: "ralphex", Marketplace: "ralphex"}, Version: "0.17.0", Enabled: true, Scope: "user"},
+		{ID: PluginID{Name: "superpowers", Marketplace: "claude-plugins-official"}, Version: "6.1.0", Enabled: true, Scope: "user"},
 	}
 	if len(got.Installed) != len(wantInstalled) {
 		t.Fatalf("Installed len = %d, want %d", len(got.Installed), len(wantInstalled))
@@ -221,7 +221,7 @@ func TestLoadPluginsInvokesCorrectCommand(t *testing.T) {
 }
 
 func TestLoadPluginsPropagatesRunError(t *testing.T) {
-	wantErr := &RunError{Args: []string{"plugin", "list", "--available", "--json"}, ExitCode: 1, Err: errors.New("exit status 1")}
+	wantErr := &RunError{Args: []string{"plugin", "list", "--available", "--json"}, Err: errors.New("exit status 1")}
 	f := &FakeRunner{Default: FakeResponse{Err: wantErr}}
 
 	_, err := LoadPlugins(t.Context(), f, "")

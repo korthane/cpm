@@ -72,6 +72,31 @@ func TestBuildPluginMatrixCellStates(t *testing.T) {
 	}
 }
 
+func TestBuildPluginMatrixCarriesScope(t *testing.T) {
+	// The UI refuses actions on non-user scopes, so the per-profile scope must
+	// survive aggregation into the cell.
+	perProfile := []claudecli.PluginData{
+		{Installed: []claudecli.InstalledPlugin{
+			{ID: id("p", "m"), Version: "1.0.0", Enabled: true, Scope: "project"},
+		}},
+		{Installed: []claudecli.InstalledPlugin{
+			{ID: id("p", "m"), Version: "1.0.0", Enabled: true, Scope: "user"},
+		}},
+	}
+
+	rows := BuildPluginMatrix(perProfile, nil)
+
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if got := rows[0].Cells[0].Scope; got != "project" {
+		t.Errorf("cell 0 scope = %q, want project", got)
+	}
+	if got := rows[0].Cells[1].Scope; got != "user" {
+		t.Errorf("cell 1 scope = %q, want user", got)
+	}
+}
+
 func TestBuildPluginMatrixLatestVersionAndOutdated(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -87,6 +112,10 @@ func TestBuildPluginMatrixLatestVersionAndOutdated(t *testing.T) {
 		{"no latest known", "1.0.0", "", false},
 		{"unknown installed version", "", "1.2.0", false},
 		{"numeric segment compare", "1.9.0", "1.10.0", true},
+		// Four-segment refs exist in the wild; they are the reason for the
+		// custom compare — a semver library would reject them.
+		{"four segments behind", "1.2.3.4", "1.2.3.5", true},
+		{"four segments equal", "1.2.3.4", "1.2.3.4", false},
 		{"missing patch segment equals zero", "1.2", "1.2.0", false},
 		{"missing patch segment behind", "1.2", "1.2.1", true},
 		{"pre-release behind its release", "1.0.0-rc1", "1.0.0", true},

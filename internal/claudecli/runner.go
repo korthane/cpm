@@ -6,12 +6,13 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Runner executes the claude CLI against a specific profile directory.
@@ -19,24 +20,25 @@ import (
 // profileDir sets CLAUDE_CONFIG_DIR for the invocation so the command targets
 // that profile; an empty profileDir leaves the ambient environment untouched.
 // Run returns the command's stdout. A non-zero exit is reported as a *RunError
-// carrying the captured stderr and exit code.
+// carrying the captured stderr.
 type Runner interface {
 	Run(ctx context.Context, profileDir string, args ...string) ([]byte, error)
 }
 
 // RunError describes a failed claude CLI invocation.
 type RunError struct {
-	Args     []string
-	Stderr   string
-	ExitCode int
-	Err      error
+	Args   []string
+	Stderr string
+	Err    error
 }
 
 func (e *RunError) Error() string {
 	msg := fmt.Sprintf("claude %s: %v", strings.Join(e.Args, " "), e.Err)
-	// The message renders inside single-line table cells; collapse interior
-	// newlines and whitespace runs so multi-line stderr cannot split a row.
-	if s := strings.Join(strings.Fields(e.Stderr), " "); s != "" {
+	// The message renders inside single-line table cells; strip ANSI escape
+	// sequences (CLIs colorize stderr, and a sequence cut by cell truncation
+	// garbles the whole row) and collapse interior newlines and whitespace
+	// runs so multi-line stderr cannot split a row.
+	if s := strings.Join(strings.Fields(ansi.Strip(e.Stderr)), " "); s != "" {
 		msg += ": " + s
 	}
 	return msg
@@ -77,11 +79,7 @@ func (r *realRunner) Run(ctx context.Context, profileDir string, args ...string)
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		runErr := &RunError{Args: args, Stderr: stderr.String(), Err: err}
-		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-			runErr.ExitCode = exitErr.ExitCode()
-		}
-		return stdout.Bytes(), runErr
+		return stdout.Bytes(), &RunError{Args: args, Stderr: stderr.String(), Err: err}
 	}
 	return stdout.Bytes(), nil
 }

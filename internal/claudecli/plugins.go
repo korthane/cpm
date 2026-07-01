@@ -29,11 +29,14 @@ func (id PluginID) String() string {
 }
 
 // InstalledPlugin is a plugin present in a profile. Version is empty when the
-// CLI reports it as "unknown".
+// CLI reports it as "unknown". Scope is where the plugin is installed ("user",
+// "project", or "local"); non-user scopes are cwd-dependent, so cpm's
+// `--scope user`-pinned actions cannot touch them.
 type InstalledPlugin struct {
 	ID      PluginID
 	Version string
 	Enabled bool
+	Scope   string
 }
 
 // AvailablePlugin is a marketplace catalog entry. LatestVersion is empty when
@@ -55,6 +58,7 @@ type installedJSON struct {
 	ID      string `json:"id"`
 	Version string `json:"version"`
 	Enabled bool   `json:"enabled"`
+	Scope   string `json:"scope"`
 }
 
 // availableJSON matches an `available[]` catalog entry. `source` is
@@ -98,6 +102,7 @@ func LoadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, 
 			ID:      ParsePluginID(p.ID),
 			Version: version,
 			Enabled: p.Enabled,
+			Scope:   p.Scope,
 		})
 	}
 	for _, a := range raw.Available {

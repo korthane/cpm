@@ -122,9 +122,6 @@ func TestRealRunnerSurfacesNonZeroExitAndStderr(t *testing.T) {
 	if !ok {
 		t.Fatalf("err type = %T, want *RunError", err)
 	}
-	if runErr.ExitCode != 3 {
-		t.Errorf("ExitCode = %d, want 3", runErr.ExitCode)
-	}
 	if !strings.Contains(runErr.Stderr, "kaboom") {
 		t.Errorf("Stderr = %q, want it to contain %q", runErr.Stderr, "kaboom")
 	}
@@ -154,6 +151,24 @@ func TestRunErrorCollapsesMultiLineStderr(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("Error() = %q, want it to contain %q", msg, want)
 		}
+	}
+}
+
+func TestRunErrorStripsANSISequences(t *testing.T) {
+	err := &RunError{
+		Args:   []string{"plugin", "list"},
+		Stderr: "\x1b[31mError:\x1b[0m fetch \x1b[1mfailed\x1b[22m",
+		Err:    errors.New("exit status 1"),
+	}
+
+	msg := err.Error()
+	// The message renders in table cells whose width-aware truncation would
+	// count and cut escape sequences wrongly, garbling the row.
+	if strings.Contains(msg, "\x1b") {
+		t.Errorf("Error() = %q, want ANSI escapes stripped", msg)
+	}
+	if !strings.Contains(msg, "Error: fetch failed") {
+		t.Errorf("Error() = %q, want the plain stderr text kept", msg)
 	}
 }
 

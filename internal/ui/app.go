@@ -21,8 +21,9 @@ import (
 // cmdTimeout bounds each UI-fired command (one shared context per tea.Cmd, so
 // a load's whole CLI sequence draws from one budget): marketplace update hits
 // the network and mcp list health-checks every server, so a hung CLI must
-// degrade to the column's error state instead of spinning forever.
-const cmdTimeout = 2 * time.Minute
+// degrade to the column's error state instead of spinning forever. A var only
+// so tests can shorten it to drive a real deadline expiry.
+var cmdTimeout = 2 * time.Minute
 
 type tab int
 
@@ -32,16 +33,9 @@ const (
 	tabCount
 )
 
-func (t tab) String() string {
-	switch t {
-	case tabPlugins:
-		return "Plugins"
-	case tabMCP:
-		return "MCP"
-	default:
-		return fmt.Sprintf("tab(%d)", int(t))
-	}
-}
+var tabNames = [tabCount]string{"Plugins", "MCP"}
+
+func (t tab) String() string { return tabNames[t] }
 
 type loadStatus int
 
@@ -57,8 +51,12 @@ type column struct {
 	profile config.Profile
 	status  loadStatus
 	// gen / mcpGen stamp each async load; a result whose stamp is no longer
-	// current is dropped, so a superseded slow load cannot overwrite newer
-	// data (e.g. a pre-action reload landing after the post-action refresh).
+	// current is dropped. mcpGen is load-bearing: a post-action MCP reload
+	// fires while an `mcp list` that read mid-mutation may still be in flight,
+	// and the stamp drops that stale result. Plugin loads are all gated on the
+	// column being idle (Init runs once, reloads skip busy/loading columns,
+	// actions hold busy until their refresh), so gen guards no reachable race
+	// today — it is insurance against a regression in that gating.
 	gen    int
 	mcpGen int
 	// busy marks a mutating CLI action in flight against this profile; action
@@ -107,21 +105,13 @@ type Model struct {
 }
 
 // pendingAction is an action held back behind the confirmation prompt.
-// Exactly one target is set: plugin for plugin actions, server for MCP
-// removes.
 type pendingAction struct {
-	verb   string
-	plugin claudecli.PluginID
-	server string
+	verb string
+	// target is the plugin id or MCP server name the action applies to; mcp
+	// says which, and thereby which CLI command a confirmation fires.
+	target string
+	mcp    bool
 	col    int
-}
-
-// target is the pending action's subject as shown in the prompt.
-func (p pendingAction) target() string {
-	if p.server != "" {
-		return p.server
-	}
-	return p.plugin.String()
 }
 
 // New builds the root model for the given profiles. All columns start in the
@@ -226,8 +216,32 @@ func (m Model) reloadPlugins() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// loadMCPAll fans out one MCP load per profile plus the spinner tick; used
-// on the first view of the MCP tab and on reload.
+// reloadMCP refires the MCP load for every column without one already in
+// flight. Unlike reloadPlugins it deliberately does not skip busy columns —
+// `mcp list` is read-only, so it cannot become a second writer — but it does
+// skip loading ones: a stacked reload could not corrupt anything, yet each
+// extra run health-checks every server, piling up expensive processes whose
+// results the gen stamp then throws away.
+func (m Model) reloadMCP() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
+	for i := range m.columns {
+		col := &m.columns[i]
+		if col.mcpStatus == statusLoading {
+			continue
+		}
+		col.mcpStatus = statusLoading
+		col.mcpErr = nil
+		col.mcpGen++
+		cmds = append(cmds, loadMCPProfile(m.runner, i, col.mcpGen, col.profile.Path))
+	}
+	cmds = append(cmds, m.spinner.Tick)
+	return tea.Batch(cmds...)
+}
+
+// loadMCPAll fans out one MCP load per profile plus the spinner tick; used on
+// the first view of the MCP tab, where every column's zero-value mcpStatus is
+// statusLoading with nothing actually in flight — reloadMCP's gate would skip
+// them all.
 func (m Model) loadMCPAll() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
 	for i := range m.columns {
@@ -467,16 +481,9 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "r":
 		// Reload only the active tab's data: the other tab's data stays valid
-		// and MCP reloads are expensive (per-server health checks). The MCP
-		// reload is not gated on busy: `mcp list` is read-only, so it cannot
-		// become a second writer, and the post-action reload supersedes it
-		// via the gen stamp anyway.
+		// and MCP reloads are expensive (per-server health checks).
 		if m.tab == tabMCP {
-			for i := range m.columns {
-				m.columns[i].mcpStatus = statusLoading
-				m.columns[i].mcpErr = nil
-			}
-			return m, m.loadMCPAll()
+			return m, m.reloadMCP()
 		}
 		return m, m.reloadPlugins()
 	case "e", "d", "u", "x", "i":
@@ -512,12 +519,13 @@ func (m Model) handleConfirmKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	col := m.columns[p.col]
-	m.setStatus(fmt.Sprintf("%s %s in %s…", p.verb, p.target(), col.profile.Label), false)
+	m.setStatus(fmt.Sprintf("%s %s in %s…", p.verb, p.target, col.profile.Label), false)
 	m.columns[p.col].busy = true
-	if p.server != "" {
-		return m, runMCPRemove(m.runner, p.col, col.profile.Path, p.server)
+	if p.mcp {
+		return m, runMCPRemove(m.runner, p.col, col.profile.Path, p.target)
 	}
-	return m, runPluginAction(m.runner, p.col, col.profile.Path, p.plugin, p.verb)
+	return m, runPluginAction(m.runner, p.col, col.profile.Path,
+		claudecli.ParsePluginID(p.target), p.verb)
 }
 
 // actionVerbs maps an action key to its `claude plugin <verb>` subcommand.
@@ -552,6 +560,14 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 		m.setStatus(fmt.Sprintf("cannot %s %s in %s", verb, row.ID, col.profile.Label), true)
 		return m, nil
 	}
+	// Actions pin --scope user (see runPluginAction), which cannot touch a
+	// project/local-scope install (cwd-dependent, shown identically in every
+	// column) — refuse with a hint instead of surfacing the CLI's raw error.
+	if s := row.Cells[m.selCol].Scope; s != "" && s != "user" {
+		m.setStatus(fmt.Sprintf("cannot %s %s: installed at %s scope — use `claude plugin` in the owning directory",
+			verb, row.ID, s), true)
+		return m, nil
+	}
 	// Plugin ids come from marketplace catalogs (third-party data); refuse
 	// anything the claude CLI would parse as a flag instead of a name.
 	if strings.HasPrefix(row.ID.String(), "-") {
@@ -566,7 +582,7 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if verb == "uninstall" {
-		m.pending = &pendingAction{verb: verb, plugin: row.ID, col: m.selCol}
+		m.pending = &pendingAction{verb: verb, target: row.ID.String(), col: m.selCol}
 		return m, nil
 	}
 	m.setStatus(fmt.Sprintf("%s %s in %s…", verb, row.ID, col.profile.Label), false)
@@ -652,7 +668,7 @@ func (m Model) startMCPAction(key string) (tea.Model, tea.Cmd) {
 	}
 	// Remove is destructive (the server's config is not recoverable from CPM),
 	// so it is always confirmation-gated.
-	m.pending = &pendingAction{verb: "remove", server: row.Name, col: m.selCol}
+	m.pending = &pendingAction{verb: "remove", target: row.Name, mcp: true, col: m.selCol}
 	return m, nil
 }
 
@@ -743,7 +759,7 @@ func (m Model) View() string {
 func (m Model) statusLine() string {
 	if m.pending != nil {
 		return m.fitWidth(fmt.Sprintf("%s %s from %s? y/n", m.pending.verb,
-			m.pending.target(), m.columns[m.pending.col].profile.Label))
+			m.pending.target, m.columns[m.pending.col].profile.Label))
 	}
 	if m.status == "" {
 		return ""

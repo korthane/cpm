@@ -63,6 +63,12 @@ a stale cache; if a refresh fails, cpm falls back to the cached catalog and
 marks the header `latest (stale)`. The MCP tab loads lazily on first view
 because `claude mcp list` runs a health check per server and is slow.
 
+Every CLI call cpm fires is time-bounded (two minutes; the marketplace refresh
+alone at 30 seconds), so a hung `claude` degrades to a per-column error — or,
+for the refresh, to the `latest (stale)` fallback — instead of freezing the UI.
+If an action times out, the CLI is killed and the profile is reloaded, since
+the change may have partially applied.
+
 ### Profile discovery precedence
 
 Highest wins; lower tiers are ignored entirely once a higher one is non-empty:
@@ -72,8 +78,10 @@ Highest wins; lower tiers are ignored entirely once a higher one is non-empty:
    order, and labels.
 3. **Auto-discovery** — home-level `~/.claude*` directories, sorted by name.
 
-Paths from CLI args and the config file support `~` expansion and are
-de-duplicated (first occurrence wins). If no tier yields a profile, cpm exits
+Paths from CLI args and the config file support `~` expansion. Profiles are
+de-duplicated by resolved path — trailing slashes and symlinked aliases
+collapse into one column, first occurrence wins — so two columns can never
+point at the same config dir. If no tier yields a profile, cpm exits
 with an error. Every resolved path must be an existing directory; cpm exits
 with an error otherwise, so typos fail fast instead of surfacing as a column
 error inside the TUI.
@@ -132,6 +140,12 @@ shows a hint to run `claude plugin marketplace add` there first. Destructive act
 (`x` uninstall/remove) require a `y` confirmation; any other key cancels
 (`ctrl+c` still quits). After an action succeeds, only the affected profile's
 data is reloaded.
+
+All plugin actions run with `--scope user`, so they only ever edit the selected
+profile's own config. A plugin installed at project or local scope
+(cwd-dependent, shown identically in every column) cannot be managed from cpm —
+actions on such rows are refused with a hint; use `claude plugin` in the owning
+directory instead.
 
 ### MCP caveats
 

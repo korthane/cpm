@@ -23,11 +23,15 @@ const (
 
 // PluginCell is one profile's state for a plugin row. Version is empty when
 // absent or when the CLI reported the version as unknown. Outdated is set when
-// Version is strictly behind the row's LatestVersion.
+// Version is strictly behind the row's LatestVersion. Scope is the install
+// scope the CLI reported ("user", "project", "local"; empty when absent) — the
+// UI refuses actions on non-user scopes, which its `--scope user`-pinned CLI
+// calls cannot touch.
 type PluginCell struct {
 	State    CellState
 	Version  string
 	Outdated bool
+	Scope    string
 }
 
 // PluginRow is one comparison-table row: a plugin identity, its latest
@@ -64,6 +68,7 @@ func BuildPluginMatrix(perProfile []claudecli.PluginData, latest map[claudecli.P
 				State:    state,
 				Version:  p.Version,
 				Outdated: versionLess(p.Version, row.LatestVersion),
+				Scope:    p.Scope,
 			}
 		}
 	}

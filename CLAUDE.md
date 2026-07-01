@@ -42,7 +42,27 @@ behavior.
 - `claude auth status --json` may exit non-zero for logged-out profiles while
   still printing valid JSON; parseable object output wins over the exit code.
 - Every UI-fired CLI call carries a timeout (`cmdTimeout` in
-  `internal/ui/app.go`) so a hung `claude` degrades to a per-column error.
+  `internal/ui/app.go`) so a hung `claude` degrades to a per-column error. The
+  marketplace refresh gets its own 30s sub-budget (`refreshTimeout` in
+  `internal/claudecli/latest.go`) so a hung git remote degrades to a stale
+  catalog instead of eating the whole load budget. A timed-out *action* is
+  "uncertain" — the write may have partially applied — and forces a column
+  reload.
+- Killing a timed-out `claude` is not enough: children it spawned (stdio MCP
+  servers from `mcp list`, git from `marketplace update`) inherit the output
+  pipes and keep `cmd.Run` blocked past the timeout. The runner starts each
+  command in its own process group and SIGKILLs the group on cancel
+  (`runner_unix.go`; `runner_other.go` is a no-op), with `WaitDelay` as the
+  pipe-closing backstop.
+- Only one writer per config dir at a time: a fresh profile load runs
+  `plugin marketplace update` (a write), so action keys are busy-gated, reload
+  skips busy/loading columns, and MCP remove is blocked during a plugin load.
+  Generation stamps on load messages only drop superseded results — they
+  cannot cancel an in-flight process.
+- All mutations pin `--scope user`: the CLI auto-detects scope otherwise, so
+  acting on a project/local-scope row (cwd-dependent, identical in every
+  column) would edit config shared by all profiles. The UI additionally
+  refuses plugin actions on cells whose reported scope is not `user`.
 - Plugin IDs and MCP server names are third-party data passed to `claude` as
   positional args; the UI refuses names starting with `-` so they cannot be
   parsed as CLI flags.

@@ -146,7 +146,7 @@ func TestLoadAuthStatusInvokesCorrectCommand(t *testing.T) {
 }
 
 func TestLoadAuthStatusPropagatesRunError(t *testing.T) {
-	wantErr := &RunError{Args: []string{"auth", "status", "--json"}, ExitCode: 1, Err: errors.New("exit status 1")}
+	wantErr := &RunError{Args: []string{"auth", "status", "--json"}, Err: errors.New("exit status 1")}
 	f := &FakeRunner{Default: FakeResponse{Err: wantErr}}
 
 	_, err := LoadAuthStatus(t.Context(), f, "")

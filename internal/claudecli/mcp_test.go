@@ -3,6 +3,7 @@ package claudecli
 import (
 	"errors"
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -121,7 +122,7 @@ func TestLoadMCP(t *testing.T) {
 		t.Errorf("profile dir = %q, want /profile", call.ProfileDir)
 	}
 	wantArgs := []string{"mcp", "list"}
-	if len(call.Args) != len(wantArgs) || call.Args[0] != wantArgs[0] || call.Args[1] != wantArgs[1] {
+	if !slices.Equal(call.Args, wantArgs) {
 		t.Errorf("args = %v, want %v", call.Args, wantArgs)
 	}
 }
