@@ -203,6 +203,31 @@ func TestResolveProfiles(t *testing.T) {
 		}
 	})
 
+	t.Run("dedup collapses hard-linked paths EvalSymlinks does not normalize", func(t *testing.T) {
+		// A hard link produces two distinct, non-symlink paths to the same
+		// inode, so EvalSymlinks returns each path unchanged (they differ as
+		// strings). This is the same shape of gap as a case-insensitive
+		// filesystem resolving "~/.claude" and "~/.Claude" to one directory
+		// while EvalSymlinks preserves the input casing in each string.
+		dir := t.TempDir()
+		original := filepath.Join(dir, "claude")
+		if err := os.WriteFile(original, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		linked := filepath.Join(dir, "claude-alias")
+		if err := os.Link(original, linked); err != nil {
+			t.Skipf("hard links unsupported on this filesystem: %v", err)
+		}
+		got, err := ResolveProfiles([]string{original, linked}, Config{}, nil, dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []Profile{{Path: original, Label: "claude"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
 	t.Run("discovered symlink alias collapses to one profile", func(t *testing.T) {
 		// AutoDiscover stats through symlinks, so ~/.claude-work -> ~/.claude
 		// yields two entries for one physical config dir; resolution must

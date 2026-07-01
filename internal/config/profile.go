@@ -103,7 +103,7 @@ func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir
 // variants like `~/.claude`, `~/.claude/`, or a symlink to it cannot become two
 // columns independently mutating one config dir.
 func normalize(profiles []Profile, homeDir string) ([]Profile, error) {
-	seen := make(map[string]struct{}, len(profiles))
+	var seen []seenPath
 	out := make([]Profile, 0, len(profiles))
 	for _, p := range profiles {
 		if p.Path == "" {
@@ -116,13 +116,45 @@ func normalize(profiles []Profile, homeDir string) ([]Profile, error) {
 			return nil, errors.New("empty profile path")
 		}
 		path := filepath.Clean(expandTilde(p.Path, homeDir))
-		if _, dup := seen[dedupKey(path)]; dup {
+		candidate := seenPath{key: dedupKey(path), info: statOrNil(path)}
+		if isDuplicate(seen, candidate) {
 			continue
 		}
-		seen[dedupKey(path)] = struct{}{}
+		seen = append(seen, candidate)
 		out = append(out, Profile{Path: path, Label: cmp.Or(p.Label, filepath.Base(path))})
 	}
 	return out, nil
+}
+
+// seenPath is a previously-accepted profile path, kept in both string and
+// stat form so isDuplicate can catch aliases EvalSymlinks' string comparison
+// misses, such as case-insensitive filesystems where "~/.claude" and
+// "~/.Claude" are the same directory but resolve to different strings.
+type seenPath struct {
+	key  string
+	info os.FileInfo
+}
+
+func statOrNil(path string) os.FileInfo {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	return info
+}
+
+// isDuplicate reports whether candidate refers to the same config dir as any
+// already-seen path, either by resolved-path string or by device+inode.
+func isDuplicate(seen []seenPath, candidate seenPath) bool {
+	for _, s := range seen {
+		if s.key == candidate.key {
+			return true
+		}
+		if s.info != nil && candidate.info != nil && os.SameFile(s.info, candidate.info) {
+			return true
+		}
+	}
+	return false
 }
 
 // dedupKey resolves symlinks so a symlinked alias of an already-listed config
