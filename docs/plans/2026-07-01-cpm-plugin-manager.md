@@ -179,15 +179,20 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
 - [x] run tests + lint — must pass before Task 5
 
 ### Task 5: Plugin data loader (per profile)
-- [ ] capture real `plugin list --available --json` output into
+- [x] capture real `plugin list --available --json` output into
       `testdata/` fixtures
-- [ ] add `LoadPlugins(ctx, Runner, profileDir) (PluginData, error)` parsing into
+- [x] add `LoadPlugins(ctx, Runner, profileDir) (PluginData, error)` parsing into
       `installed []InstalledPlugin{ID(name,marketplace), Version, Enabled}` and
       `available []AvailablePlugin{ID, LatestVersion(from source.ref)}`
-- [ ] split `id` into `name` + `marketplace`; handle `version:"unknown"`
-- [ ] write tests: parse fixture → expected structs (installed + available)
-- [ ] write tests: malformed JSON and empty arrays handled as errors/empties
-- [ ] run tests + lint — must pass before Task 6
+- [x] split `id` into `name` + `marketplace`; handle `version:"unknown"`
+- [x] write tests: parse fixture → expected structs (installed + available)
+- [x] write tests: malformed JSON and empty arrays handled as errors/empties
+- [x] run tests + lint — must pass before Task 6
+- ➕ discovered: `available[].source` is polymorphic — a plain string path or
+  an object; only `git-subdir` objects carry `ref`, and `ref` may be a branch
+  name (`main`), not a version. Some entries carry a top-level `version`
+  instead. LatestVersion = `version` field, else `source.ref` when it looks
+  like a version tag, else empty (Task 6 fallback resolves the rest).
 
 ### Task 6: Fresh latest-version resolver
 - [ ] add `RefreshMarketplaces(ctx, Runner)` → `claude plugin marketplace update`
