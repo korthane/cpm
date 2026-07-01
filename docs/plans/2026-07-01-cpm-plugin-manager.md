@@ -138,14 +138,14 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
 ## Implementation Steps
 
 ### Task 1: Scaffold the Go project
-- [ ] `git init`; add `.gitignore` (Go); `go mod init github.com/korthane/cpm`
-- [ ] add deps: `bubbletea`, `lipgloss`, `bubbles` (+ `teatest` for tests)
-- [ ] create `cmd/cpm/main.go` with a minimal Bubble Tea program that renders a
+- [x] `git init`; add `.gitignore` (Go); `go mod init github.com/korthane/cpm`
+- [x] add deps: `bubbletea`, `lipgloss`, `bubbles` (+ `teatest` for tests)
+- [x] create `cmd/cpm/main.go` with a minimal Bubble Tea program that renders a
       placeholder and quits on `q`/`ctrl+c`
-- [ ] add `Makefile` (`build`, `test`, `lint`, `run`) and `.golangci.yml`
-- [ ] write a smoke test asserting the root model's `Init`/`Update`/`View` wire
+- [x] add `Makefile` (`build`, `test`, `lint`, `run`) and `.golangci.yml`
+- [x] write a smoke test asserting the root model's `Init`/`Update`/`View` wire
       up and `q` triggers quit
-- [ ] run tests + `golangci-lint` — must pass before Task 2
+- [x] run tests + `golangci-lint` — must pass before Task 2
 
 ### Task 2: Command runner abstraction (`claudecli.Runner`)
 - [ ] define `Runner` interface `Run(ctx, profileDir string, args ...string)
