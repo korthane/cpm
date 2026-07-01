@@ -159,16 +159,16 @@ Measured: a `claude plugin list --json` spawn is ~0.3s (parallel-friendly);
 - [x] run tests + lint — must pass before Task 3
 
 ### Task 3: Profile discovery with precedence
-- [ ] implement config-file load (`~/.config/cpm/config.yaml`, optional) →
+- [x] implement config-file load (`~/.config/cpm/config.yaml`, optional) →
       `[]Profile{Path, Label}`
-- [ ] implement auto-discover of `~/.claude*` directories (dirs only, skip
+- [x] implement auto-discover of `~/.claude*` directories (dirs only, skip
       non-config dirs like `plugins/` cache paths — restrict to home-level)
-- [ ] implement `ResolveProfiles(cliArgs, config, discover)` applying precedence
+- [x] implement `ResolveProfiles(cliArgs, config, discover)` applying precedence
       CLI args > config > auto-discover; expand `~`; de-dup; preserve order
-- [ ] write tests: each precedence tier wins; `~` expansion; empty/missing config
-- [ ] write tests: CLI args restrict to exactly the given set; label defaults to
+- [x] write tests: each precedence tier wins; `~` expansion; empty/missing config
+- [x] write tests: CLI args restrict to exactly the given set; label defaults to
       basename when unlabeled
-- [ ] run tests + lint — must pass before Task 4
+- [x] run tests + lint — must pass before Task 4
 
 ### Task 4: Auth-status loader (per profile)
 - [ ] add `LoadAuthStatus(ctx, Runner, profileDir) (AuthStatus, error)` parsing
