@@ -101,6 +101,7 @@ func TestMCPLoadedFlipsOnlyThatColumn(t *testing.T) {
 
 	updated, _ := m.Update(mcpLoadedMsg{
 		index:   1,
+		gen:     m.columns[1].mcpGen,
 		servers: []claudecli.MCPServer{{Name: "exa", Target: "url"}},
 	})
 	got := updated.(Model)
@@ -131,11 +132,13 @@ func TestMCPViewShowsPresentAndAbsentCells(t *testing.T) {
 
 	updated, _ := m.Update(mcpLoadedMsg{
 		index:   0,
+		gen:     m.columns[0].mcpGen,
 		servers: []claudecli.MCPServer{{Name: "exa", Target: "https://mcp.exa.ai/mcp"}},
 	})
 	m = updated.(Model)
 	updated, _ = m.Update(mcpLoadedMsg{
 		index:   1,
+		gen:     m.columns[1].mcpGen,
 		servers: []claudecli.MCPServer{{Name: "atlassian", Target: "https://mcp.atlassian.com/v1/mcp"}},
 	})
 	m = updated.(Model)
@@ -152,7 +155,7 @@ func TestMCPErrShownInView(t *testing.T) {
 	m := New(mcpRunner(), testProfiles)
 	m, _ = switchToMCP(t, m)
 
-	updated, _ := m.Update(mcpErrMsg{index: 0, err: errors.New("mcp boom")})
+	updated, _ := m.Update(mcpErrMsg{index: 0, gen: m.columns[0].mcpGen, err: errors.New("mcp boom")})
 	m = updated.(Model)
 
 	if m.columns[0].mcpStatus != statusError {
@@ -222,7 +225,7 @@ func TestSpinnerTickAliveWhileMCPLoading(t *testing.T) {
 		t.Error("tick died while MCP column is still loading")
 	}
 
-	updated, _ := m.Update(mcpLoadedMsg{index: 0})
+	updated, _ := m.Update(mcpLoadedMsg{index: 0, gen: m.columns[0].mcpGen})
 	m = updated.(Model)
 	_, cmd = m.Update(spinner.TickMsg{ID: m.spinner.ID()})
 	if cmd != nil {

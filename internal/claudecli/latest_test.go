@@ -1,6 +1,7 @@
 package claudecli
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -114,6 +115,65 @@ func TestLoadPluginsFreshReturnsDataAndVersions(t *testing.T) {
 	}
 	if strings.Join(f.Calls[1].Args, " ") != "plugin list --available --json" {
 		t.Errorf("second call = %v, want plugin list", f.Calls[1].Args)
+	}
+}
+
+// deadlineRecordingRunner records, per space-joined args, whether the call's
+// context carried a deadline.
+type deadlineRecordingRunner struct {
+	hasDeadline map[string]bool
+}
+
+func (d *deadlineRecordingRunner) Run(ctx context.Context, _ string, args ...string) ([]byte, error) {
+	_, ok := ctx.Deadline()
+	d.hasDeadline[strings.Join(args, " ")] = ok
+	return []byte(`{"installed":[],"available":[]}`), nil
+}
+
+func TestLoadPluginsFreshBoundsRefreshWithOwnDeadline(t *testing.T) {
+	// A hung marketplace update must not eat the caller's whole budget and
+	// fail the local reads that follow: the refresh gets its own deadline
+	// even when the parent context has none.
+	r := &deadlineRecordingRunner{hasDeadline: map[string]bool{}}
+
+	if _, _, err := LoadPluginsFresh(t.Context(), r, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !r.hasDeadline["plugin marketplace update"] {
+		t.Error("marketplace update ran without its own deadline")
+	}
+	if r.hasDeadline["plugin list --available --json"] {
+		t.Error("plugin list inherited the refresh deadline, want the parent context")
+	}
+}
+
+func TestLoadPluginsCachedSkipsMarketplaceUpdate(t *testing.T) {
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin list --available --json": {Stdout: []byte(`{
+				"installed": [{"id": "a@m1", "version": "1.0.0", "enabled": true}],
+				"available": [{"pluginId": "a@m1", "version": "1.2.0", "source": "./a"}]
+			}`)},
+		},
+	}
+
+	data, lv, err := LoadPluginsCached(t.Context(), f, "/home/u/.claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lv.Stale {
+		t.Error("Stale = true, want false")
+	}
+	if len(data.Installed) != 1 {
+		t.Errorf("Installed = %+v, want one plugin", data.Installed)
+	}
+	if v := lv.Versions[PluginID{Name: "a", Marketplace: "m1"}]; v != "1.2.0" {
+		t.Errorf("a@m1 = %q, want %q", v, "1.2.0")
+	}
+	for _, c := range f.Calls {
+		if strings.Join(c.Args, " ") == "plugin marketplace update" {
+			t.Fatal("cached load ran a marketplace update")
+		}
 	}
 }
 

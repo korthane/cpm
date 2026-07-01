@@ -56,7 +56,16 @@ const (
 type column struct {
 	profile config.Profile
 	status  loadStatus
-	auth    claudecli.AuthStatus
+	// gen / mcpGen stamp each async load; a result whose stamp is no longer
+	// current is dropped, so a superseded slow load cannot overwrite newer
+	// data (e.g. a pre-action reload landing after the post-action refresh).
+	gen    int
+	mcpGen int
+	// busy marks a mutating CLI action in flight against this profile; action
+	// keys are rejected until it completes so two writes cannot race on one
+	// config dir.
+	busy bool
+	auth claudecli.AuthStatus
 	// authErr marks a failed auth read; the header degrades to blank instead
 	// of claiming "not logged in", which auth alone can't distinguish from a
 	// transient failure.
@@ -129,9 +138,11 @@ func New(r claudecli.Runner, profiles []config.Profile) Model {
 	}
 }
 
-// profileLoadedMsg delivers one profile's data; index addresses the column.
+// profileLoadedMsg delivers one profile's data; index addresses the column
+// and gen the load generation it belongs to.
 type profileLoadedMsg struct {
 	index   int
+	gen     int
 	auth    claudecli.AuthStatus
 	authErr error
 	plugins claudecli.PluginData
@@ -141,18 +152,22 @@ type profileLoadedMsg struct {
 // profileErrMsg reports a failed profile load.
 type profileErrMsg struct {
 	index int
+	gen   int
 	err   error
 }
 
-// mcpLoadedMsg delivers one profile's MCP servers; index addresses the column.
+// mcpLoadedMsg delivers one profile's MCP servers; index addresses the column
+// and gen the load generation it belongs to.
 type mcpLoadedMsg struct {
 	index   int
+	gen     int
 	servers []claudecli.MCPServer
 }
 
 // mcpErrMsg reports a failed MCP load for one profile.
 type mcpErrMsg struct {
 	index int
+	gen   int
 	err   error
 }
 
@@ -178,7 +193,8 @@ func (m Model) Init() tea.Cmd { return m.loadAll() }
 func (m Model) loadAll() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
 	for i := range m.columns {
-		cmds = append(cmds, loadProfile(m.runner, i, m.columns[i].profile.Path))
+		m.columns[i].gen++
+		cmds = append(cmds, loadProfile(m.runner, i, m.columns[i].gen, m.columns[i].profile.Path))
 	}
 	cmds = append(cmds, m.spinner.Tick)
 	return tea.Batch(cmds...)
@@ -189,25 +205,26 @@ func (m Model) loadAll() tea.Cmd {
 func (m Model) loadMCPAll() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
 	for i := range m.columns {
-		cmds = append(cmds, loadMCPProfile(m.runner, i, m.columns[i].profile.Path))
+		m.columns[i].mcpGen++
+		cmds = append(cmds, loadMCPProfile(m.runner, i, m.columns[i].mcpGen, m.columns[i].profile.Path))
 	}
 	cmds = append(cmds, m.spinner.Tick)
 	return tea.Batch(cmds...)
 }
 
-func loadMCPProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
+func loadMCPProfile(r claudecli.Runner, index, gen int, profileDir string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
 		servers, err := claudecli.LoadMCP(ctx, r, profileDir)
 		if err != nil {
-			return mcpErrMsg{index: index, err: err}
+			return mcpErrMsg{index: index, gen: gen, err: err}
 		}
-		return mcpLoadedMsg{index: index, servers: servers}
+		return mcpLoadedMsg{index: index, gen: gen, servers: servers}
 	}
 }
 
-func loadProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
+func loadProfile(r claudecli.Runner, index, gen int, profileDir string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
@@ -215,13 +232,32 @@ func loadProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
 		// latest versions never come from a stale cache (user requirement).
 		plugins, latest, err := claudecli.LoadPluginsFresh(ctx, r, profileDir)
 		if err != nil {
-			return profileErrMsg{index: index, err: err}
+			return profileErrMsg{index: index, gen: gen, err: err}
 		}
 		// A failed auth read degrades to a blank header instead of failing
 		// the whole column. (A logged-out profile is not a failure: the CLI
 		// still prints parseable JSON with loggedIn=false.)
 		auth, authErr := claudecli.LoadAuthStatus(ctx, r, profileDir)
-		return profileLoadedMsg{index: index, auth: auth, authErr: authErr,
+		return profileLoadedMsg{index: index, gen: gen, auth: auth, authErr: authErr,
+			plugins: plugins, latest: latest}
+	}
+}
+
+// refreshProfile reloads a profile's plugin data after an action without the
+// marketplace refresh: the catalog was fetched moments earlier by the initial
+// load, and a network round-trip per action would stall the action loop.
+// prevStale carries the last refresh outcome forward.
+func refreshProfile(r claudecli.Runner, index, gen int, profileDir string, prevStale bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		plugins, latest, err := claudecli.LoadPluginsCached(ctx, r, profileDir)
+		if err != nil {
+			return profileErrMsg{index: index, gen: gen, err: err}
+		}
+		latest.Stale = prevStale
+		auth, authErr := claudecli.LoadAuthStatus(ctx, r, profileDir)
+		return profileLoadedMsg{index: index, gen: gen, auth: auth, authErr: authErr,
 			plugins: plugins, latest: latest}
 	}
 }
@@ -240,6 +276,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case profileLoadedMsg:
 		col := &m.columns[msg.index]
+		if msg.gen != col.gen {
+			return m, nil
+		}
 		col.status = statusLoaded
 		col.auth = msg.auth
 		col.authErr = msg.authErr
@@ -250,12 +289,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case profileErrMsg:
 		col := &m.columns[msg.index]
+		if msg.gen != col.gen {
+			return m, nil
+		}
 		col.status = statusError
 		col.err = msg.err
 		return m, nil
 
 	case mcpLoadedMsg:
 		col := &m.columns[msg.index]
+		if msg.gen != col.mcpGen {
+			return m, nil
+		}
 		col.mcpStatus = statusLoaded
 		col.mcp = msg.servers
 		col.mcpErr = nil
@@ -263,12 +308,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mcpErrMsg:
 		col := &m.columns[msg.index]
+		if msg.gen != col.mcpGen {
+			return m, nil
+		}
 		col.mcpStatus = statusError
 		col.mcpErr = msg.err
 		return m, nil
 
 	case actionDoneMsg:
 		col := &m.columns[msg.index]
+		col.busy = false
 		if msg.err != nil {
 			// The action changed nothing, so the column's data stays valid.
 			m.setStatus(fmt.Sprintf("%s %s in %s failed: %v",
@@ -279,13 +328,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.verb, msg.plugin, col.profile.Label), false)
 		col.status = statusLoading
 		col.err = nil
+		col.gen++
 		return m, tea.Batch(
-			loadProfile(m.runner, msg.index, col.profile.Path),
+			refreshProfile(m.runner, msg.index, col.gen, col.profile.Path, col.latest.Stale),
 			m.spinner.Tick,
 		)
 
 	case mcpActionDoneMsg:
 		col := &m.columns[msg.index]
+		col.busy = false
 		if msg.err != nil {
 			// The remove changed nothing, so the column's MCP data stays valid.
 			m.setStatus(fmt.Sprintf("remove %s in %s failed: %v",
@@ -296,8 +347,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.server, col.profile.Label), false)
 		col.mcpStatus = statusLoading
 		col.mcpErr = nil
+		col.mcpGen++
 		return m, tea.Batch(
-			loadMCPProfile(m.runner, msg.index, col.profile.Path),
+			loadMCPProfile(m.runner, msg.index, col.mcpGen, col.profile.Path),
 			m.spinner.Tick,
 		)
 
@@ -410,6 +462,7 @@ func (m Model) handleConfirmKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	col := m.columns[p.col]
 	m.setStatus(fmt.Sprintf("%s %s in %s…", p.verb, p.target(), col.profile.Label), false)
+	m.columns[p.col].busy = true
 	if p.server != "" {
 		return m, runMCPRemove(m.runner, p.col, col.profile.Path, p.server)
 	}
@@ -440,6 +493,10 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 		m.setStatus(col.profile.Label+" is not loaded yet", true)
 		return m, nil
 	}
+	if col.busy {
+		m.setStatus(col.profile.Label+" has an action in progress", true)
+		return m, nil
+	}
 	if !actionAllowed(verb, row.Cells[m.selCol].State) {
 		m.setStatus(fmt.Sprintf("cannot %s %s in %s", verb, row.ID, col.profile.Label), true)
 		return m, nil
@@ -462,6 +519,7 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.setStatus(fmt.Sprintf("%s %s in %s…", verb, row.ID, col.profile.Label), false)
+	m.columns[m.selCol].busy = true
 	return m, runPluginAction(m.runner, m.selCol, col.profile.Path, row.ID, verb)
 }
 
@@ -514,6 +572,10 @@ func (m Model) startMCPAction(key string) (tea.Model, tea.Cmd) {
 		m.setStatus(col.profile.Label+" is not loaded yet", true)
 		return m, nil
 	}
+	if col.busy {
+		m.setStatus(col.profile.Label+" has an action in progress", true)
+		return m, nil
+	}
 	if !row.Cells[m.selCol].Present {
 		m.setStatus(fmt.Sprintf("cannot remove %s in %s", row.Name, col.profile.Label), true)
 		return m, nil
@@ -541,7 +603,11 @@ func runMCPRemove(r claudecli.Runner, index int, profileDir, name string) tea.Cm
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		_, err := r.Run(ctx, profileDir, "mcp", "remove", name)
+		// Scope is pinned to user — the profile's own config. Without it the
+		// CLI removes from whichever scope holds the name, so a project/local
+		// row (cwd-dependent, shown identically in every column) would be
+		// silently deleted from config shared by all profiles.
+		_, err := r.Run(ctx, profileDir, "mcp", "remove", "--scope", "user", name)
 		return mcpActionDoneMsg{index: index, server: name, err: err}
 	}
 }

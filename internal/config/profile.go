@@ -96,12 +96,14 @@ func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir
 }
 
 // normalize expands ~, fills default labels, and de-dups by resolved path while
-// preserving order.
+// preserving order. Paths are cleaned before de-duping so variants like
+// `~/.claude` and `~/.claude/` cannot become two columns independently
+// mutating one config dir.
 func normalize(profiles []Profile, homeDir string) []Profile {
 	seen := make(map[string]struct{}, len(profiles))
 	out := make([]Profile, 0, len(profiles))
 	for _, p := range profiles {
-		path := expandTilde(p.Path, homeDir)
+		path := filepath.Clean(expandTilde(p.Path, homeDir))
 		if _, dup := seen[path]; dup {
 			continue
 		}

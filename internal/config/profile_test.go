@@ -158,6 +158,17 @@ func TestResolveProfiles(t *testing.T) {
 		}
 	})
 
+	t.Run("dedup collapses path variants of one directory", func(t *testing.T) {
+		// Two columns for one config dir would mutate it concurrently.
+		got := ResolveProfiles(
+			[]string{"~/.claude", "/home/tester/.claude/", "/home/tester/.claude-x/../.claude"},
+			cfg, discovered, home)
+		want := []Profile{{Path: "/home/tester/.claude", Label: ".claude"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
 	t.Run("bare tilde expands to home", func(t *testing.T) {
 		got := ResolveProfiles([]string{"~"}, Config{}, nil, home)
 		want := []Profile{{Path: "/home/tester", Label: "tester"}}

@@ -236,6 +236,93 @@ func TestActionSuccessRefreshesProfile(t *testing.T) {
 	}
 }
 
+func TestActionRefreshSkipsMarketplaceUpdateAndKeepsStaleFlag(t *testing.T) {
+	// The catalog was refreshed moments earlier by the initial load: the
+	// post-action refresh must not pay another network round-trip, and the
+	// previous refresh outcome (stale or not) must carry forward.
+	runner := &claudecli.FakeRunner{Responses: map[string]claudecli.FakeResponse{}}
+	m := modelWithCells(t, runner, installedFoo(true))
+	loaded, _ := m.Update(profileLoadedMsg{index: 0, plugins: installedFoo(true),
+		latest: claudecli.LatestVersions{Stale: true}})
+	m = loaded.(Model)
+
+	m, cmd := press(t, m, "d")
+	runner.Responses["plugin list --available --json"] = claudecli.FakeResponse{
+		Stdout: []byte(`{"installed":[{"id":"foo@mp","version":"1.0.0","enabled":false}],"available":[]}`),
+	}
+	_, refresh := m.Update(cmd())
+
+	var loadedMsg *profileLoadedMsg
+	for _, msg := range drain(t, refresh) {
+		if l, ok := msg.(profileLoadedMsg); ok {
+			loadedMsg = &l
+		}
+	}
+	if loadedMsg == nil {
+		t.Fatal("refresh produced no profileLoadedMsg")
+	}
+	if !loadedMsg.latest.Stale {
+		t.Error("refresh dropped the stale flag, want it carried forward")
+	}
+	for _, c := range runner.Calls {
+		if strings.Join(c.Args, " ") == "plugin marketplace update" {
+			t.Fatal("post-action refresh re-ran the marketplace update")
+		}
+	}
+}
+
+func TestSecondActionBlockedWhileActionInFlight(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, installedFoo(true))
+
+	m, cmd := press(t, m, "u")
+	if cmd == nil {
+		t.Fatal("first action produced no command")
+	}
+	// The first action has not completed (its command was not run): a second
+	// mutating action against the same profile must be rejected.
+	m, cmd2 := press(t, m, "d")
+	if cmd2 != nil {
+		t.Fatal("second action ran while the first was still in flight")
+	}
+	if view := m.View(); !strings.Contains(view, "action in progress") {
+		t.Errorf("busy hint missing:\n%s", view)
+	}
+
+	// Completing the first action clears the guard.
+	updated, _ := m.Update(cmd())
+	m = updated.(Model)
+	if m.columns[0].busy {
+		t.Error("column still busy after the action completed")
+	}
+}
+
+func TestSupersededLoadResultDropped(t *testing.T) {
+	m := modelWithCells(t, &claudecli.FakeRunner{}, installedFoo(true))
+
+	// Reload supersedes the initial generation; a result stamped with the old
+	// generation (e.g. a slow pre-action load) must not flip the column back
+	// to loaded with stale data.
+	m, _ = press(t, m, "r")
+	updated, _ := m.Update(profileLoadedMsg{index: 0, gen: 0, plugins: installedFoo(false)})
+	got := updated.(Model)
+
+	if got.columns[0].status != statusLoading {
+		t.Errorf("column status = %v, want loading (stale result dropped)", got.columns[0].status)
+	}
+	if len(got.columns[0].plugins.Installed) != 1 || !got.columns[0].plugins.Installed[0].Enabled {
+		t.Errorf("stale result overwrote column data: %+v", got.columns[0].plugins)
+	}
+
+	// The current generation's result still lands.
+	updated, _ = got.Update(profileLoadedMsg{index: 0, gen: got.columns[0].gen,
+		plugins: installedFoo(false)})
+	got = updated.(Model)
+	if got.columns[0].status != statusLoaded {
+		t.Errorf("column status = %v, want loaded", got.columns[0].status)
+	}
+}
+
 func TestActionOnWrongCellStateShowsHint(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, installedFoo(true))
@@ -352,7 +439,8 @@ func TestTabSwitchClampsRowSelection(t *testing.T) {
 	}
 
 	m, _ = press(t, m, "tab")
-	loaded, _ := m.Update(mcpLoadedMsg{index: 0, servers: []claudecli.MCPServer{{Name: "exa", Target: "url"}}})
+	loaded, _ := m.Update(mcpLoadedMsg{index: 0, gen: m.columns[0].mcpGen,
+		servers: []claudecli.MCPServer{{Name: "exa", Target: "url"}}})
 	m = loaded.(Model)
 	if m.selRow != 0 {
 		t.Errorf("selRow after switch to a 1-row tab = %d, want 0 (clamped)", m.selRow)

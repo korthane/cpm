@@ -6,7 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+// refreshTimeout bounds `plugin marketplace update` alone: it is the only
+// network call in a load, and a hung refresh (unreachable git remote) must
+// fall back to the cached catalog instead of eating the caller's whole
+// budget and failing the cheap local reads that follow.
+const refreshTimeout = 30 * time.Second
 
 // Marketplace is one entry of `plugin marketplace list --json`.
 type Marketplace struct {
@@ -39,22 +46,35 @@ func ListMarketplaces(ctx context.Context, r Runner, profileDir string) ([]Marke
 // LoadPluginsFresh refreshes the profile's marketplaces (user requirement:
 // never trust a stale cache) and then loads its plugin data, so the returned
 // latest versions are resolved from the fresh catalog with a single
-// `plugin list` spawn. Refresh failure does not fail the load: the cached
-// catalog is used and Stale is set so the UI can flag the values. Catalog
-// entries without a usable version (branch refs, bare urls) are filled from
-// each marketplace's <installLocation>/.claude-plugin/marketplace.json, also
-// best-effort.
+// `plugin list` spawn. Refresh failure — including a hung refresh, which is
+// cut off by refreshTimeout — does not fail the load: the cached catalog is
+// used and Stale is set so the UI can flag the values.
 func LoadPluginsFresh(ctx context.Context, r Runner, profileDir string) (PluginData, LatestVersions, error) {
-	lv := LatestVersions{Versions: map[PluginID]string{}}
-	if _, err := r.Run(ctx, profileDir, "plugin", "marketplace", "update"); err != nil {
-		lv.Stale = true
-	}
+	refreshCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
+	_, refreshErr := r.Run(refreshCtx, profileDir, "plugin", "marketplace", "update")
+	cancel()
 
+	data, lv, err := LoadPluginsCached(ctx, r, profileDir)
+	if err != nil {
+		return PluginData{}, LatestVersions{}, err
+	}
+	lv.Stale = refreshErr != nil
+	return data, lv, nil
+}
+
+// LoadPluginsCached loads the profile's plugin data and resolves latest
+// versions from the already-fetched catalogs, skipping the marketplace
+// refresh; post-action refreshes use it because the catalog was refreshed
+// moments earlier by the initial load. Catalog entries without a usable
+// version (branch refs, bare urls) are filled from each marketplace's
+// <installLocation>/.claude-plugin/marketplace.json, best-effort.
+func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (PluginData, LatestVersions, error) {
 	data, err := LoadPlugins(ctx, r, profileDir)
 	if err != nil {
 		return PluginData{}, LatestVersions{}, err
 	}
 
+	lv := LatestVersions{Versions: map[PluginID]string{}}
 	unresolved := false
 	for _, a := range data.Available {
 		lv.Versions[a.ID] = a.LatestVersion

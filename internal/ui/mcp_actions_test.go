@@ -30,18 +30,18 @@ func mcpModelWithServers(t *testing.T, runner *claudecli.FakeRunner, perProfile 
 	}
 	m, _ = switchToMCP(t, m)
 	for i, servers := range perProfile {
-		loaded, _ := m.Update(mcpLoadedMsg{index: i, servers: servers})
+		loaded, _ := m.Update(mcpLoadedMsg{index: i, gen: m.columns[i].mcpGen, servers: servers})
 		m = loaded.(Model)
 	}
 	return m
 }
 
-// mcpRemoveCalls filters the fake's recorded calls down to `mcp remove <name>`
+// mcpRemoveCalls filters the fake's recorded calls down to `mcp remove …`
 // invocations, excluding the mcp list reads issued by refreshes.
 func mcpRemoveCalls(runner *claudecli.FakeRunner) []claudecli.FakeCall {
 	var calls []claudecli.FakeCall
 	for _, c := range runner.Calls {
-		if len(c.Args) == 3 && c.Args[0] == "mcp" && c.Args[1] == "remove" {
+		if len(c.Args) >= 3 && c.Args[0] == "mcp" && c.Args[1] == "remove" {
 			calls = append(calls, c)
 		}
 	}
@@ -86,8 +86,10 @@ func TestMCPRemoveBlockedUntilConfirmed(t *testing.T) {
 	if calls[0].ProfileDir != "/h/p0" {
 		t.Errorf("profile dir = %q, want /h/p0", calls[0].ProfileDir)
 	}
-	if !slices.Equal(calls[0].Args, []string{"mcp", "remove", "exa"}) {
-		t.Errorf("args = %v, want [mcp remove exa]", calls[0].Args)
+	// Scope must be pinned to user so a remove never touches shared
+	// project/local-scope config claimed by every column.
+	if !slices.Equal(calls[0].Args, []string{"mcp", "remove", "--scope", "user", "exa"}) {
+		t.Errorf("args = %v, want [mcp remove --scope user exa]", calls[0].Args)
 	}
 }
 
@@ -115,8 +117,8 @@ func TestMCPRemoveTargetsSelectedCell(t *testing.T) {
 		t.Errorf("profile dir = %q, want /h/p1", calls[0].ProfileDir)
 	}
 	// Rows sort by name: row 1 is exa.
-	if !slices.Equal(calls[0].Args, []string{"mcp", "remove", "exa"}) {
-		t.Errorf("args = %v, want [mcp remove exa]", calls[0].Args)
+	if !slices.Equal(calls[0].Args, []string{"mcp", "remove", "--scope", "user", "exa"}) {
+		t.Errorf("args = %v, want [mcp remove --scope user exa]", calls[0].Args)
 	}
 }
 
@@ -176,6 +178,27 @@ func TestMCPRemoveSuccessRefreshesProfile(t *testing.T) {
 	}
 }
 
+func TestMCPRemoveBlockedWhileRemoveInFlight(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := mcpModelWithServers(t, runner,
+		[]claudecli.MCPServer{{Name: "exa", Target: "https://mcp.exa.ai/mcp"}})
+
+	m, _ = press(t, m, "x")
+	m, cmd := press(t, m, "y")
+	if cmd == nil {
+		t.Fatal("confirmed remove produced no command")
+	}
+	// The remove has not completed (its command was not run): a second remove
+	// against the same profile must not even arm the confirmation prompt.
+	m, cmd2 := press(t, m, "x")
+	if cmd2 != nil || m.pending != nil {
+		t.Fatal("second remove armed while the first was still in flight")
+	}
+	if view := m.View(); !strings.Contains(view, "action in progress") {
+		t.Errorf("busy hint missing:\n%s", view)
+	}
+}
+
 func TestMCPRemoveRefusesPluginProvidedServer(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := mcpModelWithServers(t, runner,
@@ -219,7 +242,7 @@ func TestMCPRemoveOnEmptyMatrixDoesNothing(t *testing.T) {
 func TestMCPRemoveFailureSurfacesErrorAndKeepsState(t *testing.T) {
 	runner := &claudecli.FakeRunner{
 		Responses: map[string]claudecli.FakeResponse{
-			"mcp remove exa": {Err: errors.New("boom")},
+			"mcp remove --scope user exa": {Err: errors.New("boom")},
 		},
 	}
 	m := mcpModelWithServers(t, runner,

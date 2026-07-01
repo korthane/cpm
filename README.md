@@ -139,6 +139,8 @@ data is reloaded.
   scope servers tied to the directory cpm is launched from and servers
   provided by plugins (`plugin:<plugin>:<name>`). Those rows look identical
   in every profile column.
-- Removal runs `claude mcp remove <name>`, which removes the server from
-  whichever scope it exists in. Plugin-provided servers cannot be removed
-  this way; cpm blocks the action and suggests uninstalling the plugin.
+- Removal runs `claude mcp remove --scope user <name>`, so it only ever edits
+  the selected profile's own config. Removing a project/local-scope row fails
+  with the CLI's error; use `claude mcp remove` in the owning directory for
+  those. Plugin-provided servers cannot be removed this way either; cpm blocks
+  the action and suggests uninstalling the plugin.
