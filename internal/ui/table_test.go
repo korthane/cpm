@@ -1,10 +1,12 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/korthane/cpm/internal/claudecli"
 	"github.com/korthane/cpm/internal/config"
@@ -60,7 +62,7 @@ func fourProfiles(t *testing.T) Model {
 	for i := range profiles {
 		loaded, _ := m.Update(profileLoadedMsg{
 			index:   i,
-			auth:    claudecli.AuthStatus{Email: "u@example.com", SubscriptionType: "pro"},
+			auth:    claudecli.AuthStatus{LoggedIn: true, Email: "u@example.com", SubscriptionType: "pro"},
 			plugins: data,
 			latest:  latest,
 		})
@@ -195,6 +197,76 @@ func TestBodyCellFormattingInView(t *testing.T) {
 	}
 }
 
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		w    int
+		want string
+	}{
+		{"fits untouched", "ab", 2, "ab"},
+		{"cut with ellipsis", "abcdef", 4, "abc…"},
+		{"width one", "abc", 1, "…"},
+		{"zero width", "abc", 0, ""},
+		{"negative width", "abc", -1, ""},
+		{"empty at zero width", "", 0, ""},
+		{"wide runes fit", "日本語", 6, "日本語"},
+		{"wide runes cut on cell boundary", "日本語", 4, "日…"},
+		{"wide rune would straddle the cut", "日本語", 5, "日本…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.s, tt.w)
+			if got != tt.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tt.s, tt.w, got, tt.want)
+			}
+			if w := lipgloss.Width(got); w > max(0, tt.w) {
+				t.Errorf("truncate(%q, %d) is %d cells wide, over the limit", tt.s, tt.w, w)
+			}
+		})
+	}
+}
+
+func TestVerticalScrollKeepsSelectedRowVisible(t *testing.T) {
+	installed := make([]claudecli.InstalledPlugin, 20)
+	for i := range installed {
+		installed[i] = claudecli.InstalledPlugin{
+			ID:      claudecli.PluginID{Name: fmt.Sprintf("plug%02d", i), Marketplace: "mp"},
+			Version: "1.0.0", Enabled: true,
+		}
+	}
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, claudecli.PluginData{Installed: installed})
+	// Height 16 leaves room for 5 body rows next to the fixed chrome.
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 16})
+	m = resized.(Model)
+
+	view := m.View()
+	if !strings.Contains(view, "plug00") {
+		t.Errorf("top window missing first row:\n%s", view)
+	}
+	if strings.Contains(view, "plug10") {
+		t.Errorf("row beyond the window rendered:\n%s", view)
+	}
+	if !strings.Contains(view, "… rows 1–5 of 20") {
+		t.Errorf("overflow marker missing:\n%s", view)
+	}
+
+	for range 10 {
+		m, _ = press(t, m, "down")
+	}
+	view = m.View()
+	if !strings.Contains(view, "plug10") {
+		t.Errorf("selected row not scrolled into view:\n%s", view)
+	}
+	if strings.Contains(view, "plug00") {
+		t.Errorf("row scrolled out still rendered:\n%s", view)
+	}
+	if !strings.Contains(view, "… rows 7–11 of 20") {
+		t.Errorf("overflow marker not updated:\n%s", view)
+	}
+}
+
 func TestLoadingColumnShowsSpinnerInTable(t *testing.T) {
 	m := New(okRunner(), testProfiles)
 	loaded, _ := m.Update(profileLoadedMsg{index: 0})
@@ -204,7 +276,7 @@ func TestLoadingColumnShowsSpinnerInTable(t *testing.T) {
 	if !strings.Contains(view, "loading…") {
 		t.Errorf("View() missing loading marker for pending column:\n%s", view)
 	}
-	if !strings.Contains(view, m.columns[1].spinner.View()) {
+	if !strings.Contains(view, m.spinner.View()) {
 		t.Errorf("View() missing spinner frame for pending column:\n%s", view)
 	}
 }

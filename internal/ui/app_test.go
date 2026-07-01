@@ -67,8 +67,8 @@ func TestInitFiresLoadPerProfile(t *testing.T) {
 	if loaded != len(testProfiles) {
 		t.Errorf("got %d profileLoadedMsg, want %d", loaded, len(testProfiles))
 	}
-	if ticks != len(testProfiles) {
-		t.Errorf("got %d spinner ticks, want %d", ticks, len(testProfiles))
+	if ticks != 1 {
+		t.Errorf("got %d spinner ticks, want 1 (one shared spinner)", ticks)
 	}
 	for i := range testProfiles {
 		if !seen[i] {
@@ -238,21 +238,23 @@ func TestProfileErrSetsErrorState(t *testing.T) {
 	}
 }
 
-func TestSpinnerTickAdvancesOnlyLoadingColumns(t *testing.T) {
+func TestSpinnerTickAliveOnlyWhileColumnsLoading(t *testing.T) {
 	m := New(okRunner(), testProfiles)
 	loaded, _ := m.Update(profileLoadedMsg{index: 0})
 	m = loaded.(Model)
 
-	// A tick for the still-loading column keeps ticking.
-	_, cmd := m.Update(spinner.TickMsg{ID: m.columns[1].spinner.ID()})
+	// One column still loading: the tick keeps rescheduling itself.
+	updated, cmd := m.Update(spinner.TickMsg{ID: m.spinner.ID()})
+	m = updated.(Model)
 	if cmd == nil {
-		t.Error("tick for loading column returned no follow-up command")
+		t.Error("tick returned no follow-up command while a column is loading")
 	}
 
-	// A tick for the loaded column dies out.
-	_, cmd = m.Update(spinner.TickMsg{ID: m.columns[0].spinner.ID()})
-	if cmd != nil {
-		t.Error("tick for loaded column returned a follow-up command, want none")
+	// Everything loaded: the tick dies out.
+	loaded, _ = m.Update(profileLoadedMsg{index: 1})
+	m = loaded.(Model)
+	if _, cmd := m.Update(spinner.TickMsg{ID: m.spinner.ID()}); cmd != nil {
+		t.Error("tick returned a follow-up command with nothing loading, want none")
 	}
 }
 
@@ -325,7 +327,7 @@ func TestViewShowsProfileLabelsAndStates(t *testing.T) {
 	m := New(okRunner(), testProfiles)
 	loaded, _ := m.Update(profileLoadedMsg{
 		index: 0,
-		auth:  claudecli.AuthStatus{Email: "u@example.com", SubscriptionType: "pro"},
+		auth:  claudecli.AuthStatus{LoggedIn: true, Email: "u@example.com", SubscriptionType: "pro"},
 	})
 	m = loaded.(Model)
 	errored, _ := m.Update(profileErrMsg{index: 1, err: errors.New("boom")})

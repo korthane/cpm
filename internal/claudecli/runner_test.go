@@ -1,8 +1,10 @@
 package claudecli
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -127,5 +129,21 @@ func TestRealRunnerSurfacesNonZeroExitAndStderr(t *testing.T) {
 	}
 	if !strings.Contains(runErr.Error(), "kaboom") {
 		t.Errorf("Error() = %q, want it to include stderr", runErr.Error())
+	}
+	// The wrapper must stay unwrappable to the underlying exec error.
+	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
+		t.Errorf("err = %v does not unwrap to *exec.ExitError", err)
+	}
+}
+
+func TestRealRunnerHonorsCancelledContext(t *testing.T) {
+	stub := writeScript(t, "#!/bin/sh\nsleep 30\n")
+	r := &realRunner{binary: stub}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if _, err := r.Run(ctx, "", "anything"); err == nil {
+		t.Fatal("expected error from a cancelled context, got nil")
 	}
 }

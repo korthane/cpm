@@ -18,17 +18,16 @@ rightmost identity column, one row per resource. Two tabs:
 Each profile column header shows the directory path plus the account email and
 subscription plan for that profile.
 
-![screenshot placeholder](docs/screenshot.png)
-
 cpm is a thin front end over the public `claude` CLI: all reads use
-`claude ... --json` and all mutations use `claude plugin ...` / `claude mcp
+`claude ... --json` (except `claude mcp list`, which has no JSON mode and is
+parsed as plain text) and all mutations use `claude plugin ...` / `claude mcp
 remove`, each invoked with `CLAUDE_CONFIG_DIR` pointed at the target profile.
 cpm never edits Claude's internal JSON files directly.
 
 ## Requirements
 
 - The `claude` CLI must be on `PATH` — every read and action shells out to it.
-- Go 1.26+ to build from source.
+- Go 1.26.4+ to build from source.
 
 ## Install / build
 
@@ -96,8 +95,8 @@ kicks in); malformed YAML is an error.
 | Key | Action |
 | --- | --- |
 | `←` / `→` | select profile column (the table scrolls to keep it visible) |
-| `↑` / `↓` | select row |
-| `tab` | switch between the Plugins and MCP tabs |
+| `↑` / `↓` | select row (tall tables scroll to keep it visible) |
+| `tab` / `shift+tab` | cycle between the Plugins and MCP tabs |
 | `r` | reload the active tab's data |
 | `q` / `ctrl+c` | quit |
 
@@ -116,8 +115,20 @@ MCP tab:
 | Key | Action |
 | --- | --- |
 | `x` | remove the server from the selected profile (asks `y/n`) |
+| `i` | not supported in v1 — shows a hint to use `claude mcp add` directly |
 
 Action keys are validated against the cell state (e.g. `i` only works where
 the plugin is absent) and show a hint on mismatch. Destructive actions
-(`x` uninstall/remove) require a `y` confirmation; any other key cancels.
-After an action succeeds, only the affected profile's data is reloaded.
+(`x` uninstall/remove) require a `y` confirmation; any other key cancels
+(`ctrl+c` still quits). After an action succeeds, only the affected profile's
+data is reloaded.
+
+### MCP caveats
+
+- `claude mcp list` reports servers from every scope, including project/local
+  scope servers tied to the directory cpm is launched from and servers
+  provided by plugins (`plugin:<plugin>:<name>`). Those rows look identical
+  in every profile column.
+- Removal runs `claude mcp remove <name>`, which removes the server from
+  whichever scope it exists in. Plugin-provided servers cannot be removed
+  this way; cpm blocks the action and suggests uninstalling the plugin.

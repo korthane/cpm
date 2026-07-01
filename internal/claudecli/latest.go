@@ -23,13 +23,6 @@ type LatestVersions struct {
 	Stale bool
 }
 
-// RefreshMarketplaces re-fetches every marketplace of a profile from its
-// source so that the local catalogs carry current latest versions.
-func RefreshMarketplaces(ctx context.Context, r Runner, profileDir string) error {
-	_, err := r.Run(ctx, profileDir, "plugin", "marketplace", "update")
-	return err
-}
-
 // ListMarketplaces fetches the marketplaces configured in a profile.
 func ListMarketplaces(ctx context.Context, r Runner, profileDir string) ([]Marketplace, error) {
 	out, err := r.Run(ctx, profileDir, "plugin", "marketplace", "list", "--json")
@@ -43,24 +36,17 @@ func ListMarketplaces(ctx context.Context, r Runner, profileDir string) ([]Marke
 	return markets, nil
 }
 
-// ResolveLatestVersions refreshes all marketplaces and returns the fresh
-// latest version per available plugin (user requirement: never trust a stale
-// cache). The refresh is best-effort: on failure the cached catalog is used
-// and Stale is set so the UI can flag the values. Catalog entries without a
-// usable version (branch refs, bare urls) are filled from each marketplace's
-// <installLocation>/.claude-plugin/marketplace.json, also best-effort.
-func ResolveLatestVersions(ctx context.Context, r Runner, profileDir string) (LatestVersions, error) {
-	_, lv, err := LoadPluginsFresh(ctx, r, profileDir)
-	return lv, err
-}
-
-// LoadPluginsFresh refreshes the profile's marketplaces and then loads its
-// plugin data, so the returned latest versions are resolved from the fresh
-// catalog with a single `plugin list` spawn. Refresh failure does not fail
-// the load: the cached catalog is used and Stale is set.
+// LoadPluginsFresh refreshes the profile's marketplaces (user requirement:
+// never trust a stale cache) and then loads its plugin data, so the returned
+// latest versions are resolved from the fresh catalog with a single
+// `plugin list` spawn. Refresh failure does not fail the load: the cached
+// catalog is used and Stale is set so the UI can flag the values. Catalog
+// entries without a usable version (branch refs, bare urls) are filled from
+// each marketplace's <installLocation>/.claude-plugin/marketplace.json, also
+// best-effort.
 func LoadPluginsFresh(ctx context.Context, r Runner, profileDir string) (PluginData, LatestVersions, error) {
 	lv := LatestVersions{Versions: map[PluginID]string{}}
-	if err := RefreshMarketplaces(ctx, r, profileDir); err != nil {
+	if _, err := r.Run(ctx, profileDir, "plugin", "marketplace", "update"); err != nil {
 		lv.Stale = true
 	}
 

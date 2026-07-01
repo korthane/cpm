@@ -87,6 +87,11 @@ func TestBuildPluginMatrixLatestVersionAndOutdated(t *testing.T) {
 		{"no latest known", "1.0.0", "", false},
 		{"unknown installed version", "", "1.2.0", false},
 		{"numeric segment compare", "1.9.0", "1.10.0", true},
+		{"missing patch segment equals zero", "1.2", "1.2.0", false},
+		{"missing patch segment behind", "1.2", "1.2.1", true},
+		{"pre-release behind its release", "1.0.0-rc1", "1.0.0", true},
+		{"release not behind its pre-release", "1.0.0", "1.0.0-rc1", false},
+		{"pre-releases ordered lexically", "1.0.0-rc1", "1.0.0-rc2", true},
 	}
 
 	for _, tt := range tests {

@@ -41,6 +41,8 @@ func modelWithCells(t *testing.T, runner *claudecli.FakeRunner, perProfile ...cl
 
 func press(t *testing.T, m Model, key string) (Model, tea.Cmd) {
 	t.Helper()
+	// Special keys must be sent as their real key types: a KeyRunes message
+	// with the key's *name* as runes is not something a terminal produces.
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
 	switch key {
 	case "left":
@@ -51,6 +53,12 @@ func press(t *testing.T, m Model, key string) (Model, tea.Cmd) {
 		msg = tea.KeyMsg{Type: tea.KeyUp}
 	case "down":
 		msg = tea.KeyMsg{Type: tea.KeyDown}
+	case "tab":
+		msg = tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		msg = tea.KeyMsg{Type: tea.KeyShiftTab}
+	case "ctrl+c":
+		msg = tea.KeyMsg{Type: tea.KeyCtrlC}
 	}
 	updated, cmd := m.Update(msg)
 	return updated.(Model), cmd
@@ -79,7 +87,12 @@ func TestActionKeysInvokeCorrectCLI(t *testing.T) {
 		{"enable disabled plugin", "e", "enable", []claudecli.PluginData{installedFoo(false)}, 0},
 		{"disable enabled plugin", "d", "disable", []claudecli.PluginData{installedFoo(true)}, 0},
 		{"update installed plugin", "u", "update", []claudecli.PluginData{installedFoo(true)}, 0},
-		{"install where absent", "i", "install", []claudecli.PluginData{installedFoo(true), {}}, 1},
+		// The target profile carries foo in its catalog: install requires the
+		// plugin's marketplace configured there.
+		{"install where absent", "i", "install", []claudecli.PluginData{
+			installedFoo(true),
+			{Available: []claudecli.AvailablePlugin{{ID: fooID, LatestVersion: "1.2.0"}}},
+		}, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -253,6 +266,115 @@ func TestActionOnLoadingColumnShowsHint(t *testing.T) {
 	}
 	if view := m.View(); !strings.Contains(view, "p1 is not loaded yet") {
 		t.Errorf("hint missing:\n%s", view)
+	}
+}
+
+func TestInstallBlockedWhenMarketplaceMissingInTarget(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	// p1 has no catalog entry for foo@mp: its marketplace is not configured.
+	m := modelWithCells(t, runner, installedFoo(true), claudecli.PluginData{})
+	m, _ = press(t, m, "right")
+
+	m, cmd := press(t, m, "i")
+	if cmd != nil || len(runner.Calls) != 0 {
+		t.Fatal("install without the marketplace reached the CLI")
+	}
+	if view := m.View(); !strings.Contains(view, `marketplace "mp" is not configured`) {
+		t.Errorf("missing-marketplace hint missing:\n%s", view)
+	}
+}
+
+func TestPluginActionRefusesFlagLikeName(t *testing.T) {
+	evil := claudecli.PluginID{Name: "--evil", Marketplace: "mp"}
+	data := claudecli.PluginData{
+		Installed: []claudecli.InstalledPlugin{{ID: evil, Version: "1.0.0", Enabled: true}},
+	}
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, data)
+
+	m, cmd := press(t, m, "u")
+	if cmd != nil || len(runner.Calls) != 0 {
+		t.Fatal("flag-like plugin name reached the CLI")
+	}
+	if view := m.View(); !strings.Contains(view, "looks like a CLI flag") {
+		t.Errorf("refusal hint missing:\n%s", view)
+	}
+}
+
+func TestActionKeysOnEmptyMatrixDoNothing(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, claudecli.PluginData{})
+
+	for _, key := range []string{"e", "d", "u", "x", "i"} {
+		if _, cmd := press(t, m, key); cmd != nil {
+			t.Errorf("key %q on an empty matrix produced a command", key)
+		}
+	}
+	if len(runner.Calls) != 0 {
+		t.Fatalf("empty-matrix action reached the CLI: %v", runner.Calls)
+	}
+}
+
+func TestCtrlCQuitsDuringConfirmation(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, installedFoo(true))
+
+	m, _ = press(t, m, "x") // arm the uninstall confirmation
+	_, cmd := press(t, m, "ctrl+c")
+	if cmd == nil {
+		t.Fatal("ctrl+c during confirmation returned no command")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("ctrl+c during confirmation did not quit")
+	}
+	if len(pluginCalls(runner, "uninstall")) != 0 {
+		t.Fatal("ctrl+c during confirmation ran the pending action")
+	}
+}
+
+func TestTabSwitchClampsRowSelection(t *testing.T) {
+	// Five plugin rows, one MCP row: switching tabs with a high selRow must
+	// clamp it so `up` responds immediately on the new tab.
+	installed := make([]claudecli.InstalledPlugin, 5)
+	for i := range installed {
+		installed[i] = claudecli.InstalledPlugin{
+			ID:      claudecli.PluginID{Name: fmt.Sprintf("plug%d", i), Marketplace: "mp"},
+			Version: "1.0.0", Enabled: true,
+		}
+	}
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, claudecli.PluginData{Installed: installed})
+	for range 4 {
+		m, _ = press(t, m, "down")
+	}
+	if m.selRow != 4 {
+		t.Fatalf("selRow = %d, want 4", m.selRow)
+	}
+
+	m, _ = press(t, m, "tab")
+	loaded, _ := m.Update(mcpLoadedMsg{index: 0, servers: []claudecli.MCPServer{{Name: "exa", Target: "url"}}})
+	m = loaded.(Model)
+	if m.selRow != 0 {
+		t.Errorf("selRow after switch to a 1-row tab = %d, want 0 (clamped)", m.selRow)
+	}
+	if m, _ = press(t, m, "up"); m.selRow != 0 {
+		t.Errorf("selRow after up = %d, want 0", m.selRow)
+	}
+}
+
+func TestShiftTabSwitchesTabAndStartsMCPLoad(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, installedFoo(true))
+
+	m, cmd := press(t, m, "shift+tab")
+	if m.tab != tabMCP {
+		t.Fatalf("tab after shift+tab = %v, want MCP", m.tab)
+	}
+	if cmd == nil {
+		t.Fatal("first switch to the MCP tab fired no lazy load")
+	}
+	if m, _ = press(t, m, "shift+tab"); m.tab != tabPlugins {
+		t.Errorf("tab after second shift+tab = %v, want plugins", m.tab)
 	}
 }
 

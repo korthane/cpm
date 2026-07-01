@@ -5,7 +5,9 @@ package ui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +17,11 @@ import (
 	"github.com/korthane/cpm/internal/config"
 	"github.com/korthane/cpm/internal/model"
 )
+
+// cmdTimeout bounds every claude invocation fired from the UI: marketplace
+// update hits the network and mcp list health-checks every server, so a hung
+// CLI must degrade to the column's error state instead of spinning forever.
+const cmdTimeout = 2 * time.Minute
 
 type tab int
 
@@ -52,9 +59,8 @@ type column struct {
 	plugins claudecli.PluginData
 	// latest carries the profile's freshly resolved latest versions (its
 	// marketplaces are re-fetched on every load; Stale marks a failed fetch).
-	latest  claudecli.LatestVersions
-	err     error
-	spinner spinner.Model
+	latest claudecli.LatestVersions
+	err    error
 	// MCP state loads lazily (mcp list is slow) and independently of the
 	// plugin data, so it carries its own status/error pair.
 	mcp       []claudecli.MCPServer
@@ -68,10 +74,14 @@ type Model struct {
 	tab     tab
 	columns []column
 	// selRow / selCol address the selected matrix cell; the view scrolls
-	// horizontally so the selected profile column stays visible.
+	// horizontally and vertically so the selected cell stays visible.
 	selRow int
 	selCol int
 	width  int
+	height int
+	// spinner is shared by every loading cell; its tick stays alive while
+	// anything is still loading.
+	spinner spinner.Model
 	// mcpStarted flips on the first view of the MCP tab: mcp list runs a
 	// health check per server, so it only loads once actually needed.
 	mcpStarted bool
@@ -105,12 +115,13 @@ func (p pendingAction) target() string {
 func New(r claudecli.Runner, profiles []config.Profile) Model {
 	columns := make([]column, len(profiles))
 	for i, p := range profiles {
-		columns[i] = column{
-			profile: p,
-			spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		}
+		columns[i] = column{profile: p}
 	}
-	return Model{runner: r, columns: columns}
+	return Model{
+		runner:  r,
+		columns: columns,
+		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+	}
 }
 
 // profileLoadedMsg delivers one profile's data; index addresses the column.
@@ -154,33 +165,35 @@ type mcpActionDoneMsg struct {
 	err    error
 }
 
-// Init fans out one load command per profile (they run in parallel) plus each
-// column's spinner tick.
+// Init fans out one load command per profile (they run in parallel) plus the
+// spinner tick.
 func (m Model) Init() tea.Cmd { return m.loadAll() }
 
 func (m Model) loadAll() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, 2*len(m.columns))
+	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
 	for i := range m.columns {
 		cmds = append(cmds, loadProfile(m.runner, i, m.columns[i].profile.Path))
-		cmds = append(cmds, m.columns[i].spinner.Tick)
 	}
+	cmds = append(cmds, m.spinner.Tick)
 	return tea.Batch(cmds...)
 }
 
-// loadMCPAll fans out one MCP load per profile plus the spinner ticks; used
+// loadMCPAll fans out one MCP load per profile plus the spinner tick; used
 // on the first view of the MCP tab and on reload.
 func (m Model) loadMCPAll() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, 2*len(m.columns))
+	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
 	for i := range m.columns {
 		cmds = append(cmds, loadMCPProfile(m.runner, i, m.columns[i].profile.Path))
-		cmds = append(cmds, m.columns[i].spinner.Tick)
 	}
+	cmds = append(cmds, m.spinner.Tick)
 	return tea.Batch(cmds...)
 }
 
 func loadMCPProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
 	return func() tea.Msg {
-		servers, err := claudecli.LoadMCP(context.Background(), r, profileDir)
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		servers, err := claudecli.LoadMCP(ctx, r, profileDir)
 		if err != nil {
 			return mcpErrMsg{index: index, err: err}
 		}
@@ -190,7 +203,8 @@ func loadMCPProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
 
 func loadProfile(r claudecli.Runner, index int, profileDir string) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
 		// The fresh load re-fetches the profile's marketplaces so the pinned
 		// latest versions never come from a stale cache (user requirement).
 		plugins, latest, err := claudecli.LoadPluginsFresh(ctx, r, profileDir)
@@ -213,6 +227,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 
 	case profileLoadedMsg:
@@ -257,7 +272,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col.err = nil
 		return m, tea.Batch(
 			loadProfile(m.runner, msg.index, col.profile.Path),
-			col.spinner.Tick,
+			m.spinner.Tick,
 		)
 
 	case mcpActionDoneMsg:
@@ -274,31 +289,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col.mcpErr = nil
 		return m, tea.Batch(
 			loadMCPProfile(m.runner, msg.index, col.profile.Path),
-			col.spinner.Tick,
+			m.spinner.Tick,
 		)
 
 	case spinner.TickMsg:
-		// Each spinner only reacts to its own tick (matched by ID), so
-		// forwarding to loading columns keeps exactly their ticks alive.
-		var cmds []tea.Cmd
-		for i := range m.columns {
-			if !m.columnLoading(i) {
-				continue
-			}
-			var cmd tea.Cmd
-			m.columns[i].spinner, cmd = m.columns[i].spinner.Update(msg)
-			cmds = append(cmds, cmd)
+		// The shared spinner keeps ticking while anything is still loading
+		// and dies out otherwise (the load helpers restart it).
+		if !m.anyLoading() {
+			return m, nil
 		}
-		return m, tea.Batch(cmds...)
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
 
 // columnLoading reports whether column i still has a load in flight — plugin
-// data, or MCP data once its lazy load has started — keeping its spinner alive.
+// data, or MCP data once its lazy load has started.
 func (m Model) columnLoading(i int) bool {
 	return m.columns[i].status == statusLoading ||
 		(m.mcpStarted && m.columns[i].mcpStatus == statusLoading)
+}
+
+// anyLoading reports whether any column still has a load in flight; it keeps
+// the shared spinner alive.
+func (m Model) anyLoading() bool {
+	for i := range m.columns {
+		if m.columnLoading(i) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -309,13 +331,12 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "tab", "shift+tab":
+	case "tab":
 		m.tab = (m.tab + 1) % tabCount
-		if m.tab == tabMCP && !m.mcpStarted {
-			m.mcpStarted = true
-			return m, m.loadMCPAll()
-		}
-		return m, nil
+		return m, m.enterTab()
+	case "shift+tab":
+		m.tab = (m.tab + tabCount - 1) % tabCount
+		return m, m.enterTab()
 	case "left":
 		m.selCol = max(0, m.selCol-1)
 		return m, nil
@@ -323,7 +344,10 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selCol = min(len(m.columns)-1, m.selCol+1)
 		return m, nil
 	case "up":
-		m.selRow = max(0, m.selRow-1)
+		// Clamp before moving: a reload can shrink the row set under an
+		// out-of-range selection, which would otherwise need dead presses
+		// to walk back into view.
+		m.selRow = max(0, min(m.selRow, m.rowCount()-1)-1)
 		return m, nil
 	case "down":
 		m.selRow = min(max(0, m.rowCount()-1), m.selRow+1)
@@ -352,9 +376,23 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// enterTab clamps the row selection to the new tab's row count and starts
+// the lazy MCP load on the first visit.
+func (m *Model) enterTab() tea.Cmd {
+	m.selRow = min(m.selRow, max(0, m.rowCount()-1))
+	if m.tab == tabMCP && !m.mcpStarted {
+		m.mcpStarted = true
+		return m.loadMCPAll()
+	}
+	return nil
+}
+
 // handleConfirmKey resolves the confirmation prompt: y runs the held-back
-// action, any other key cancels it.
+// action, any other key cancels it — except ctrl+c, which must always quit.
 func (m Model) handleConfirmKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
 	p := *m.pending
 	m.pending = nil
 	if key.String() != "y" {
@@ -397,12 +435,33 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 		m.setStatus(fmt.Sprintf("cannot %s %s in %s", verb, row.ID, col.profile.Label), true)
 		return m, nil
 	}
+	// Plugin ids come from marketplace catalogs (third-party data); refuse
+	// anything the claude CLI would parse as a flag instead of a name.
+	if strings.HasPrefix(row.ID.String(), "-") {
+		m.setStatus(fmt.Sprintf("refusing %s: plugin name looks like a CLI flag", row.ID), true)
+		return m, nil
+	}
+	// Installing needs the plugin's marketplace configured in the target
+	// profile; without it the CLI would fail with a raw lookup error.
+	if verb == "install" && !hasAvailable(col.plugins, row.ID) {
+		m.setStatus(fmt.Sprintf("cannot install %s in %s: marketplace %q is not configured there"+
+			" (claude plugin marketplace add)", row.ID, col.profile.Label, row.ID.Marketplace), true)
+		return m, nil
+	}
 	if verb == "uninstall" {
 		m.pending = &pendingAction{verb: verb, plugin: row.ID, col: m.selCol}
 		return m, nil
 	}
 	m.setStatus(fmt.Sprintf("%s %s in %s…", verb, row.ID, col.profile.Label), false)
 	return m, runPluginAction(m.runner, m.selCol, col.profile.Path, row.ID, verb)
+}
+
+// hasAvailable reports whether the plugin appears in the profile's own
+// marketplace catalogs.
+func hasAvailable(data claudecli.PluginData, id claudecli.PluginID) bool {
+	return slices.ContainsFunc(data.Available, func(a claudecli.AvailablePlugin) bool {
+		return a.ID == id
+	})
 }
 
 // actionAllowed reports whether the verb makes sense for the cell's state:
@@ -450,6 +509,19 @@ func (m Model) startMCPAction(key string) (tea.Model, tea.Cmd) {
 		m.setStatus(fmt.Sprintf("cannot remove %s in %s", row.Name, col.profile.Label), true)
 		return m, nil
 	}
+	// Server names come straight from CLI output; refuse anything the
+	// claude CLI would parse as a flag instead of a name.
+	if strings.HasPrefix(row.Name, "-") {
+		m.setStatus(fmt.Sprintf("refusing %s: server name looks like a CLI flag", row.Name), true)
+		return m, nil
+	}
+	// plugin:<plugin>:<name> servers are provided by plugins, not by the
+	// profile's MCP config; `claude mcp remove` cannot touch them.
+	if strings.HasPrefix(row.Name, "plugin:") {
+		m.setStatus(fmt.Sprintf("cannot remove %s: it is provided by a plugin — uninstall the plugin instead",
+			row.Name), true)
+		return m, nil
+	}
 	// Remove is destructive (the server's config is not recoverable from CPM),
 	// so it is always confirmation-gated.
 	m.pending = &pendingAction{verb: "remove", server: row.Name, col: m.selCol}
@@ -458,7 +530,9 @@ func (m Model) startMCPAction(key string) (tea.Model, tea.Cmd) {
 
 func runMCPRemove(r claudecli.Runner, index int, profileDir, name string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := r.Run(context.Background(), profileDir, "mcp", "remove", name)
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		_, err := r.Run(ctx, profileDir, "mcp", "remove", name)
 		return mcpActionDoneMsg{index: index, server: name, err: err}
 	}
 }
@@ -467,7 +541,9 @@ func runPluginAction(r claudecli.Runner, index int, profileDir string,
 	plugin claudecli.PluginID, verb string,
 ) tea.Cmd {
 	return func() tea.Msg {
-		_, err := r.Run(context.Background(), profileDir, "plugin", verb, plugin.String())
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		_, err := r.Run(ctx, profileDir, "plugin", verb, plugin.String())
 		return actionDoneMsg{index: index, verb: verb, plugin: plugin, err: err}
 	}
 }
@@ -561,22 +637,23 @@ func (m Model) pluginMatrix() ([]model.PluginRow, bool) {
 
 func (m Model) viewPlugins() string {
 	rows, stale := m.pluginMatrix()
+	selRow := max(0, min(m.selRow, len(rows)-1))
+	start, end := m.rowWindow(len(rows))
 
 	table := comparisonTable{
 		profiles: make([]tableColumn, len(m.columns)),
-		pinned:   pinnedPluginColumn(rows, stale),
+		pinned:   pinnedPluginColumn(rows, start, end, stale),
 		sel:      m.selCol,
 		width:    m.width,
 	}
-	selRow := min(m.selRow, len(rows)-1)
 	for i := range m.columns {
 		rowSel := -1
 		if i == m.selCol {
-			rowSel = selRow
+			rowSel = selRow - start
 		}
-		table.profiles[i] = m.columns[i].pluginColumn(i, rows, rowSel)
+		table.profiles[i] = m.columns[i].pluginColumn(i, rows[start:end], rowSel, m.spinner.View())
 	}
-	return table.render()
+	return table.render() + m.overflowLine(start, end, len(rows))
 }
 
 // mcpRows builds the MCP comparison matrix from the currently loaded columns.
@@ -599,28 +676,58 @@ func (m Model) rowCount() int {
 
 func (m Model) viewMCP() string {
 	rows := m.mcpRows()
+	selRow := max(0, min(m.selRow, len(rows)-1))
+	start, end := m.rowWindow(len(rows))
 
 	table := comparisonTable{
 		profiles: make([]tableColumn, len(m.columns)),
-		pinned:   pinnedMCPColumn(rows),
+		pinned:   pinnedMCPColumn(rows[start:end]),
 		sel:      m.selCol,
 		width:    m.width,
 	}
-	selRow := min(m.selRow, len(rows)-1)
 	for i := range m.columns {
 		rowSel := -1
 		if i == m.selCol {
-			rowSel = selRow
+			rowSel = selRow - start
 		}
-		table.profiles[i] = m.columns[i].mcpColumn(i, rows, rowSel)
+		table.profiles[i] = m.columns[i].mcpColumn(i, rows[start:end], rowSel, m.spinner.View())
 	}
-	return table.render()
+	return table.render() + m.overflowLine(start, end, len(rows))
+}
+
+// rowWindow bounds the matrix rows rendered so the table fits the terminal
+// height with the selected row always visible; rows scroll under the fixed
+// headers.
+func (m Model) rowWindow(total int) (start, end int) {
+	capacity := total
+	if m.height > 0 {
+		// Fixed chrome around the body: tab bar and blank line, three
+		// header lines, separator, trailing blank, status line, two help
+		// lines, and the overflow marker.
+		const chrome = 11
+		capacity = max(1, m.height-chrome)
+	}
+	if capacity >= total {
+		return 0, total
+	}
+	sel := min(m.selRow, total-1)
+	start = min(max(0, sel-capacity+1), total-capacity)
+	return start, start + capacity
+}
+
+// overflowLine marks rows hidden by the vertical window.
+func (m Model) overflowLine(start, end, total int) string {
+	if start == 0 && end == total {
+		return ""
+	}
+	return statusStyle.Render(fmt.Sprintf("… rows %d–%d of %d", start+1, end, total)) + "\n"
 }
 
 // pluginColumn is this profile's table column: a three-line header
 // (label, path, account or load status) plus one cell per matrix row.
-// selRow marks the selected cell (-1 when the selection is elsewhere).
-func (c *column) pluginColumn(idx int, rows []model.PluginRow, selRow int) tableColumn {
+// selRow marks the selected cell (-1 when the selection is elsewhere);
+// spin is the shared spinner frame for loading cells.
+func (c *column) pluginColumn(idx int, rows []model.PluginRow, selRow int, spin string) tableColumn {
 	labelCell := tableCell{text: c.profile.Label, style: labelStyle}
 	if selRow >= 0 {
 		labelCell.style = labelStyle.Underline(true)
@@ -629,7 +736,7 @@ func (c *column) pluginColumn(idx int, rows []model.PluginRow, selRow int) table
 		header: []tableCell{
 			labelCell,
 			{text: c.profile.Path, style: pathStyle},
-			c.statusCell(),
+			c.statusCell(spin),
 		},
 		cells: make([]tableCell, len(rows)),
 	}
@@ -645,8 +752,9 @@ func (c *column) pluginColumn(idx int, rows []model.PluginRow, selRow int) table
 
 // mcpColumn is this profile's MCP-tab column: the same three-line header as
 // the plugins tab (with the MCP load state on the third line) plus one cell
-// per server row. selRow marks the selected cell (-1 when elsewhere).
-func (c *column) mcpColumn(idx int, rows []model.MCPRow, selRow int) tableColumn {
+// per server row. selRow marks the selected cell (-1 when elsewhere); spin
+// is the shared spinner frame for loading cells.
+func (c *column) mcpColumn(idx int, rows []model.MCPRow, selRow int, spin string) tableColumn {
 	labelCell := tableCell{text: c.profile.Label, style: labelStyle}
 	if selRow >= 0 {
 		labelCell.style = labelStyle.Underline(true)
@@ -655,7 +763,7 @@ func (c *column) mcpColumn(idx int, rows []model.MCPRow, selRow int) tableColumn
 		header: []tableCell{
 			labelCell,
 			{text: c.profile.Path, style: pathStyle},
-			c.mcpStatusCell(),
+			c.mcpStatusCell(spin),
 		},
 		cells: make([]tableCell, len(rows)),
 	}
@@ -671,14 +779,14 @@ func (c *column) mcpColumn(idx int, rows []model.MCPRow, selRow int) tableColumn
 
 // mcpStatusCell shows the MCP load state while it is in flight (mcp list is
 // slow), then falls back to the shared account line.
-func (c *column) mcpStatusCell() tableCell {
+func (c *column) mcpStatusCell(spin string) tableCell {
 	switch c.mcpStatus {
 	case statusLoaded:
-		return c.statusCell()
+		return c.statusCell(spin)
 	case statusError:
 		return tableCell{text: "error: " + c.mcpErr.Error(), style: errStyle}
 	default:
-		return tableCell{text: c.spinner.View() + " loading…"}
+		return tableCell{text: spin + " loading…"}
 	}
 }
 
@@ -696,9 +804,12 @@ func (c *column) mcpBodyCell(cell model.MCPCell) tableCell {
 
 // statusCell is the third header line: the account while loaded, otherwise
 // the column's load state (spinner or error).
-func (c *column) statusCell() tableCell {
+func (c *column) statusCell(spin string) tableCell {
 	switch c.status {
 	case statusLoaded:
+		if !c.auth.LoggedIn {
+			return tableCell{text: "not logged in", style: pathStyle}
+		}
 		var parts []string
 		if c.auth.Email != "" {
 			parts = append(parts, c.auth.Email)
@@ -707,13 +818,13 @@ func (c *column) statusCell() tableCell {
 			parts = append(parts, c.auth.SubscriptionType)
 		}
 		if len(parts) == 0 {
-			return tableCell{text: "not logged in", style: pathStyle}
+			return tableCell{text: "logged in"}
 		}
 		return tableCell{text: strings.Join(parts, " · ")}
 	case statusError:
 		return tableCell{text: "error: " + c.err.Error(), style: errStyle}
 	default:
-		return tableCell{text: c.spinner.View() + " loading…"}
+		return tableCell{text: spin + " loading…"}
 	}
 }
 
@@ -760,9 +871,11 @@ func formatPluginCell(c model.PluginCell) string {
 
 // pinnedPluginColumn is the identity column: `name@marketplace` plus the
 // latest available version, with the versions left-aligned in a sub-column.
-// stale marks the versions as possibly outdated (a marketplace refresh
-// failed, so at least one profile fell back to its cached catalog).
-func pinnedPluginColumn(rows []model.PluginRow, stale bool) tableColumn {
+// Cells cover the vertical window [start, end) but the sub-column width comes
+// from all rows so it does not jump while scrolling. stale marks the versions
+// as possibly outdated (a marketplace refresh failed, so at least one profile
+// fell back to its cached catalog).
+func pinnedPluginColumn(rows []model.PluginRow, start, end int, stale bool) tableColumn {
 	const title = "plugin@marketplace"
 	idW := lipgloss.Width(title)
 	for _, row := range rows {
@@ -776,14 +889,14 @@ func pinnedPluginColumn(rows []model.PluginRow, stale bool) tableColumn {
 	col := tableColumn{
 		// Two blank lines align the title with the last profile-header line.
 		header: []tableCell{{}, {}, {
-			text:  fmt.Sprintf("%-*s  %s", idW, title, latestTitle),
+			text:  padRight(title, idW) + "  " + latestTitle,
 			style: labelStyle,
 		}},
-		cells: make([]tableCell, len(rows)),
+		cells: make([]tableCell, 0, end-start),
 	}
-	for i, row := range rows {
-		text := fmt.Sprintf("%-*s  %s", idW, row.ID.String(), versionText(row.LatestVersion))
-		col.cells[i] = tableCell{text: strings.TrimRight(text, " ")}
+	for _, row := range rows[start:end] {
+		text := padRight(row.ID.String(), idW) + "  " + versionText(row.LatestVersion)
+		col.cells = append(col.cells, tableCell{text: strings.TrimRight(text, " ")})
 	}
 	return col
 }

@@ -8,11 +8,10 @@ import (
 )
 
 // MCPCell is one profile's state for an MCP server row: whether the server is
-// configured there and, if so, its target and health status.
+// configured there and, if so, its target.
 type MCPCell struct {
 	Present bool
 	Target  string
-	Status  string
 }
 
 // MCPRow is one comparison-table row: a server name plus one cell per profile
@@ -33,7 +32,7 @@ func BuildMCPMatrix(perProfile [][]claudecli.MCPServer) []MCPRow {
 				row = &MCPRow{Name: s.Name, Cells: make([]MCPCell, len(perProfile))}
 				byName[s.Name] = row
 			}
-			row.Cells[i] = MCPCell{Present: true, Target: s.Target, Status: s.Status}
+			row.Cells[i] = MCPCell{Present: true, Target: s.Target}
 		}
 	}
 

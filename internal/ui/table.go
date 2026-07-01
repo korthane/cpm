@@ -171,11 +171,20 @@ func padCell(c tableCell, w int) string {
 	return c.style.Render(text) + padding
 }
 
+// padRight pads s with spaces to w display cells. fmt's %-*s counts runes,
+// which misaligns wide (e.g. CJK) characters.
+func padRight(s string, w int) string {
+	return s + strings.Repeat(" ", max(0, w-lipgloss.Width(s)))
+}
+
 // truncate shortens s to at most w display cells, ending in an ellipsis when
 // it had to cut.
 func truncate(s string, w int) string {
 	if lipgloss.Width(s) <= w {
 		return s
+	}
+	if w <= 0 {
+		return ""
 	}
 	var b strings.Builder
 	used := 0

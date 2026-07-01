@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -15,8 +16,21 @@ import (
 	"github.com/korthane/cpm/internal/ui"
 )
 
+const usage = `usage: cpm [<profile-dir> ...]
+
+With no arguments, profiles come from ~/.config/cpm/config.yaml or are
+auto-discovered as ~/.claude* directories.`
+
 func main() {
-	profiles, err := resolveProfiles(os.Args[1:])
+	args := os.Args[1:]
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			fmt.Println(usage)
+			return
+		}
+	}
+
+	profiles, err := resolveProfiles(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cpm:", err)
 		os.Exit(1)
@@ -32,6 +46,13 @@ func main() {
 // resolveProfiles applies the discovery precedence (CLI args > config file >
 // auto-discover) and fails when no profile can be found.
 func resolveProfiles(cliArgs []string) ([]config.Profile, error) {
+	// cpm takes no flags; a dashed argument is a typo, not a profile dir.
+	for _, arg := range cliArgs {
+		if strings.HasPrefix(arg, "-") {
+			return nil, fmt.Errorf("unknown flag %q", arg)
+		}
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home dir: %w", err)
@@ -51,6 +72,14 @@ func resolveProfiles(cliArgs []string) ([]config.Profile, error) {
 	if len(profiles) == 0 {
 		return nil, errors.New("no profiles found: pass directories as arguments " +
 			"or configure ~/.config/cpm/config.yaml")
+	}
+	// Fail fast on typos: a missing directory would otherwise surface as a
+	// confusing per-column CLI error inside the TUI.
+	for _, p := range profiles {
+		info, err := os.Stat(p.Path)
+		if err != nil || !info.IsDir() {
+			return nil, fmt.Errorf("profile %s is not a directory", p.Path)
+		}
 	}
 	return profiles, nil
 }

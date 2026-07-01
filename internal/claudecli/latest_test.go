@@ -9,34 +9,6 @@ import (
 	"testing"
 )
 
-func TestRefreshMarketplaces(t *testing.T) {
-	f := &FakeRunner{}
-
-	if err := RefreshMarketplaces(t.Context(), f, "/tmp/profile-z"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(f.Calls) != 1 {
-		t.Fatalf("recorded %d calls, want 1", len(f.Calls))
-	}
-	call := f.Calls[0]
-	if call.ProfileDir != "/tmp/profile-z" {
-		t.Errorf("ProfileDir = %q, want %q", call.ProfileDir, "/tmp/profile-z")
-	}
-	if strings.Join(call.Args, " ") != "plugin marketplace update" {
-		t.Errorf("Args = %v, want [plugin marketplace update]", call.Args)
-	}
-}
-
-func TestRefreshMarketplacesPropagatesError(t *testing.T) {
-	wantErr := errors.New("network down")
-	f := &FakeRunner{Default: FakeResponse{Err: wantErr}}
-
-	if err := RefreshMarketplaces(t.Context(), f, ""); !errors.Is(err, wantErr) {
-		t.Fatalf("err = %v, want %v", err, wantErr)
-	}
-}
-
 func TestListMarketplacesFixture(t *testing.T) {
 	f := &FakeRunner{
 		Responses: map[string]FakeResponse{
@@ -97,47 +69,55 @@ func writeCatalog(t *testing.T, dir, content string) {
 	}
 }
 
-func TestResolveLatestVersionsFresh(t *testing.T) {
+func TestLoadPluginsFreshReturnsDataAndVersions(t *testing.T) {
 	f := &FakeRunner{
 		Responses: map[string]FakeResponse{
 			"plugin marketplace update": {},
 			"plugin list --available --json": {Stdout: []byte(`{
-				"installed": [],
+				"installed": [{"id": "a@m1", "version": "1.0.0", "enabled": true}],
 				"available": [
-					{"pluginId": "a@m1", "source": {"source": "git-subdir", "ref": "v1.5.5"}},
-					{"pluginId": "b@m1", "version": "2.0.0", "source": "./plugins/b"}
+					{"pluginId": "a@m1", "version": "1.2.0", "source": "./a"},
+					{"pluginId": "b@m1", "source": {"source": "git-subdir", "ref": "v1.5.5"}}
 				]
 			}`)},
 		},
 	}
 
-	got, err := ResolveLatestVersions(t.Context(), f, "/home/u/.claude")
+	data, lv, err := LoadPluginsFresh(t.Context(), f, "/home/u/.claude")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.Stale {
+	if lv.Stale {
 		t.Error("Stale = true, want false")
 	}
-	if v := got.Versions[PluginID{Name: "a", Marketplace: "m1"}]; v != "v1.5.5" {
-		t.Errorf("a@m1 = %q, want %q", v, "v1.5.5")
+	if len(data.Installed) != 1 || data.Installed[0].Version != "1.0.0" {
+		t.Errorf("Installed = %+v, want one v1.0.0 plugin", data.Installed)
 	}
-	if v := got.Versions[PluginID{Name: "b", Marketplace: "m1"}]; v != "2.0.0" {
-		t.Errorf("b@m1 = %q, want %q", v, "2.0.0")
+	if v := lv.Versions[PluginID{Name: "a", Marketplace: "m1"}]; v != "1.2.0" {
+		t.Errorf("a@m1 = %q, want %q", v, "1.2.0")
+	}
+	if v := lv.Versions[PluginID{Name: "b", Marketplace: "m1"}]; v != "v1.5.5" {
+		t.Errorf("b@m1 = %q, want %q", v, "v1.5.5")
 	}
 
-	// The refresh must run before the catalog read so the versions are fresh.
-	if len(f.Calls) < 2 {
-		t.Fatalf("recorded %d calls, want at least 2", len(f.Calls))
+	// One refresh, then one catalog read — the data and the versions must come
+	// from the same single `plugin list` spawn, run after the refresh so the
+	// versions are fresh.
+	if len(f.Calls) != 2 {
+		t.Fatalf("recorded %d calls, want 2: %v", len(f.Calls), f.Calls)
 	}
 	if strings.Join(f.Calls[0].Args, " ") != "plugin marketplace update" {
 		t.Errorf("first call = %v, want marketplace update", f.Calls[0].Args)
+	}
+	if f.Calls[0].ProfileDir != "/home/u/.claude" {
+		t.Errorf("refresh profile dir = %q, want /home/u/.claude", f.Calls[0].ProfileDir)
 	}
 	if strings.Join(f.Calls[1].Args, " ") != "plugin list --available --json" {
 		t.Errorf("second call = %v, want plugin list", f.Calls[1].Args)
 	}
 }
 
-func TestResolveLatestVersionsStaleOnRefreshFailure(t *testing.T) {
+func TestLoadPluginsFreshStaleOnRefreshFailure(t *testing.T) {
 	f := &FakeRunner{
 		Responses: map[string]FakeResponse{
 			"plugin marketplace update": {Err: errors.New("marketplace source unreachable")},
@@ -147,19 +127,19 @@ func TestResolveLatestVersionsStaleOnRefreshFailure(t *testing.T) {
 		},
 	}
 
-	got, err := ResolveLatestVersions(t.Context(), f, "")
+	_, lv, err := LoadPluginsFresh(t.Context(), f, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !got.Stale {
+	if !lv.Stale {
 		t.Error("Stale = false, want true after refresh failure")
 	}
-	if v := got.Versions[PluginID{Name: "a", Marketplace: "m1"}]; v != "1.0.0" {
+	if v := lv.Versions[PluginID{Name: "a", Marketplace: "m1"}]; v != "1.0.0" {
 		t.Errorf("a@m1 = %q, want cached %q", v, "1.0.0")
 	}
 }
 
-func TestResolveLatestVersionsCatalogFileFallback(t *testing.T) {
+func TestLoadPluginsFreshCatalogFileFallback(t *testing.T) {
 	dir := t.TempDir()
 	writeCatalog(t, dir, `{
 		"name": "m1",
@@ -185,7 +165,7 @@ func TestResolveLatestVersionsCatalogFileFallback(t *testing.T) {
 		},
 	}
 
-	got, err := ResolveLatestVersions(t.Context(), f, "")
+	_, got, err := LoadPluginsFresh(t.Context(), f, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -200,7 +180,7 @@ func TestResolveLatestVersionsCatalogFileFallback(t *testing.T) {
 	}
 }
 
-func TestResolveLatestVersionsFallbackIsBestEffort(t *testing.T) {
+func TestLoadPluginsFreshFallbackIsBestEffort(t *testing.T) {
 	available := FakeResponse{Stdout: []byte(`{
 		"available": [{"pluginId": "a@m1", "source": {"source": "github"}}]
 	}`)}
@@ -212,6 +192,18 @@ func TestResolveLatestVersionsFallbackIsBestEffort(t *testing.T) {
 		{
 			name:        "marketplace list fails",
 			marketplace: FakeResponse{Err: errors.New("boom")},
+		},
+		{
+			name: "plugin's marketplace missing from the list",
+			marketplace: FakeResponse{Stdout: []byte(`[
+				{"name": "other", "installLocation": "/somewhere"}
+			]`)},
+		},
+		{
+			name: "marketplace has an empty install location",
+			marketplace: FakeResponse{Stdout: []byte(`[
+				{"name": "m1", "installLocation": ""}
+			]`)},
 		},
 		{
 			name: "install location has no catalog file",
@@ -243,7 +235,7 @@ func TestResolveLatestVersionsFallbackIsBestEffort(t *testing.T) {
 				},
 			}
 
-			got, err := ResolveLatestVersions(t.Context(), f, "")
+			_, got, err := LoadPluginsFresh(t.Context(), f, "")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -254,7 +246,7 @@ func TestResolveLatestVersionsFallbackIsBestEffort(t *testing.T) {
 	}
 }
 
-func TestResolveLatestVersionsSkipsMarketplaceListWhenComplete(t *testing.T) {
+func TestLoadPluginsFreshSkipsMarketplaceListWhenComplete(t *testing.T) {
 	f := &FakeRunner{
 		Responses: map[string]FakeResponse{
 			"plugin marketplace update": {},
@@ -264,7 +256,7 @@ func TestResolveLatestVersionsSkipsMarketplaceListWhenComplete(t *testing.T) {
 		},
 	}
 
-	if _, err := ResolveLatestVersions(t.Context(), f, ""); err != nil {
+	if _, _, err := LoadPluginsFresh(t.Context(), f, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, call := range f.Calls {
@@ -274,61 +266,7 @@ func TestResolveLatestVersionsSkipsMarketplaceListWhenComplete(t *testing.T) {
 	}
 }
 
-func TestLoadPluginsFreshReturnsDataAndVersions(t *testing.T) {
-	f := &FakeRunner{
-		Responses: map[string]FakeResponse{
-			"plugin marketplace update": {},
-			"plugin list --available --json": {Stdout: []byte(`{
-				"installed": [{"id": "a@m1", "version": "1.0.0", "enabled": true}],
-				"available": [{"pluginId": "a@m1", "version": "1.2.0", "source": "./a"}]
-			}`)},
-		},
-	}
-
-	data, lv, err := LoadPluginsFresh(t.Context(), f, "/home/u/.claude")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if lv.Stale {
-		t.Error("Stale = true, want false")
-	}
-	if len(data.Installed) != 1 || data.Installed[0].Version != "1.0.0" {
-		t.Errorf("Installed = %+v, want one v1.0.0 plugin", data.Installed)
-	}
-	if v := lv.Versions[PluginID{Name: "a", Marketplace: "m1"}]; v != "1.2.0" {
-		t.Errorf("a@m1 = %q, want %q", v, "1.2.0")
-	}
-
-	// One refresh, one catalog read — the data and the versions must come from
-	// the same single `plugin list` spawn.
-	if len(f.Calls) != 2 {
-		t.Fatalf("recorded %d calls, want 2: %v", len(f.Calls), f.Calls)
-	}
-	if strings.Join(f.Calls[0].Args, " ") != "plugin marketplace update" {
-		t.Errorf("first call = %v, want marketplace update", f.Calls[0].Args)
-	}
-}
-
-func TestLoadPluginsFreshStaleOnRefreshFailure(t *testing.T) {
-	f := &FakeRunner{
-		Responses: map[string]FakeResponse{
-			"plugin marketplace update": {Err: errors.New("unreachable")},
-			"plugin list --available --json": {Stdout: []byte(`{
-				"available": [{"pluginId": "a@m1", "version": "1.0.0", "source": "./a"}]
-			}`)},
-		},
-	}
-
-	_, lv, err := LoadPluginsFresh(t.Context(), f, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !lv.Stale {
-		t.Error("Stale = false, want true after refresh failure")
-	}
-}
-
-func TestResolveLatestVersionsCatalogLoadError(t *testing.T) {
+func TestLoadPluginsFreshCatalogLoadError(t *testing.T) {
 	f := &FakeRunner{
 		Responses: map[string]FakeResponse{
 			"plugin marketplace update":      {},
@@ -336,7 +274,7 @@ func TestResolveLatestVersionsCatalogLoadError(t *testing.T) {
 		},
 	}
 
-	if _, err := ResolveLatestVersions(t.Context(), f, ""); err == nil {
+	if _, _, err := LoadPluginsFresh(t.Context(), f, ""); err == nil {
 		t.Fatal("expected error when plugin list fails, got nil")
 	}
 }

@@ -117,7 +117,8 @@ func compareVersions(a, b string) int {
 	as := strings.Split(strings.TrimPrefix(a, "v"), ".")
 	bs := strings.Split(strings.TrimPrefix(b, "v"), ".")
 	for i := range max(len(as), len(bs)) {
-		var sa, sb string
+		// A missing segment counts as 0 so "1.2" equals "1.2.0".
+		sa, sb := "0", "0"
 		if i < len(as) {
 			sa = as[i]
 		}
@@ -131,14 +132,42 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
-// compareSegments compares one dotted segment numerically when both sides are
-// numbers (so "9" < "10") and lexically otherwise (pre-release suffixes and
-// such — good enough for an outdated flag).
+// compareSegments compares one dotted segment: numerically when both sides
+// start with a number (so "9" < "10"), with the semver pre-release rule when
+// the numbers match ("0-rc1" < "0"), and lexically otherwise — good enough
+// for an outdated flag.
 func compareSegments(a, b string) int {
-	na, errA := strconv.Atoi(a)
-	nb, errB := strconv.Atoi(b)
-	if errA == nil && errB == nil {
-		return cmp.Compare(na, nb)
+	na, sufA, okA := splitSegment(a)
+	nb, sufB, okB := splitSegment(b)
+	if !okA || !okB {
+		return cmp.Compare(a, b)
 	}
-	return cmp.Compare(a, b)
+	if c := cmp.Compare(na, nb); c != 0 {
+		return c
+	}
+	switch {
+	case sufA == "":
+		if sufB == "" {
+			return 0
+		}
+		return 1 // a release is newer than its own pre-releases
+	case sufB == "":
+		return -1
+	default:
+		return cmp.Compare(sufA, sufB)
+	}
+}
+
+// splitSegment splits "0-rc1" into 0 and "-rc1"; ok is false when the segment
+// does not start with a parseable number.
+func splitSegment(s string) (n int, suffix string, ok bool) {
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0, s, false
+	}
+	n, err := strconv.Atoi(s[:i])
+	return n, s[i:], err == nil
 }

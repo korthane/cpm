@@ -1,0 +1,45 @@
+# cpm — developer notes
+
+Terminal UI (Bubble Tea) comparing Claude Code plugins and MCP servers across
+profiles (`CLAUDE_CONFIG_DIR` directories). See README.md for user-facing
+behavior.
+
+## Commands
+
+- `make build` / `make test` / `make lint` (golangci-lint) / `make run`
+- Coverage bar: 80%+ on non-UI packages (`claudecli`, `config`, `model`).
+
+## Architecture
+
+- `internal/claudecli` — wraps the `claude` CLI behind the `Runner` interface;
+  every invocation sets `CLAUDE_CONFIG_DIR` to the target profile. cpm never
+  edits Claude's JSON files directly; all mutations go through the CLI.
+- `internal/config` — profile resolution: CLI args > `~/.config/cpm/config.yaml`
+  > auto-discovered `~/.claude*` directories.
+- `internal/model` — pure aggregation of per-profile CLI data into comparison
+  matrices; no I/O.
+- `internal/ui` — Bubble Tea app: one `column` of state per profile, loads run
+  async per profile, the MCP tab loads lazily on first view.
+
+## Testing conventions
+
+- `claudecli.FakeRunner` (in `fake.go`, not a `_test.go` file, so `config` and
+  `ui` tests can inject it) returns canned responses keyed by the space-joined
+  args and records every call.
+- Real CLI output is captured as fixtures under `internal/claudecli/testdata/`.
+- UI behavior is tested by driving `Model.Update` directly with key/load
+  messages and asserting on `View()` output; no TTY needed.
+
+## Non-obvious constraints
+
+- `claude plugin list --available --json`: the `source` field is polymorphic —
+  a plain string path or an object whose `ref` may be a branch name, not a
+  version.
+- `claude mcp list` has no `--json` mode and health-checks every server, so it
+  is slow — hence the lazy MCP tab and tab-scoped reload. Its output includes
+  project/local-scope servers (cwd-dependent) and plugin-provided servers
+  (`plugin:<plugin>:<name>`), which `claude mcp remove` cannot remove.
+- `claude auth status --json` may exit non-zero for logged-out profiles while
+  still printing valid JSON; parseable object output wins over the exit code.
+- Every UI-fired CLI call carries a timeout (`cmdTimeout` in
+  `internal/ui/app.go`) so a hung `claude` degrades to a per-column error.

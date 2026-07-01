@@ -67,6 +67,19 @@ func TestLoadAuthStatus(t *testing.T) {
 			runErr: errors.New("exit status 1"),
 			want:   AuthStatus{LoggedIn: false},
 		},
+		{
+			// `null` unmarshals into the zero value without error; it must
+			// not mask a failed invocation as a logged-out status.
+			name:    "null stdout does not mask runner error",
+			stdout:  []byte("null"),
+			runErr:  errors.New("exit status 1"),
+			wantErr: true,
+		},
+		{
+			name:    "null stdout without runner error is an error",
+			stdout:  []byte("null"),
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

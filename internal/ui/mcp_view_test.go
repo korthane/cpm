@@ -111,12 +111,12 @@ func TestMCPViewShowsPresentAndAbsentCells(t *testing.T) {
 
 	updated, _ := m.Update(mcpLoadedMsg{
 		index:   0,
-		servers: []claudecli.MCPServer{{Name: "exa", Target: "https://mcp.exa.ai/mcp", Status: "✔ Connected"}},
+		servers: []claudecli.MCPServer{{Name: "exa", Target: "https://mcp.exa.ai/mcp"}},
 	})
 	m = updated.(Model)
 	updated, _ = m.Update(mcpLoadedMsg{
 		index:   1,
-		servers: []claudecli.MCPServer{{Name: "atlassian", Target: "https://mcp.atlassian.com/v1/mcp", Status: "✔ Connected"}},
+		servers: []claudecli.MCPServer{{Name: "atlassian", Target: "https://mcp.atlassian.com/v1/mcp"}},
 	})
 	m = updated.(Model)
 
@@ -197,14 +197,14 @@ func TestSpinnerTickAliveWhileMCPLoading(t *testing.T) {
 	m = loaded.(Model)
 	m, _ = switchToMCP(t, m)
 
-	_, cmd := m.Update(spinner.TickMsg{ID: m.columns[0].spinner.ID()})
+	_, cmd := m.Update(spinner.TickMsg{ID: m.spinner.ID()})
 	if cmd == nil {
 		t.Error("tick died while MCP column is still loading")
 	}
 
 	updated, _ := m.Update(mcpLoadedMsg{index: 0})
 	m = updated.(Model)
-	_, cmd = m.Update(spinner.TickMsg{ID: m.columns[0].spinner.ID()})
+	_, cmd = m.Update(spinner.TickMsg{ID: m.spinner.ID()})
 	if cmd != nil {
 		t.Error("tick survived after both plugin and MCP data loaded")
 	}

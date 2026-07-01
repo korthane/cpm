@@ -126,9 +126,33 @@ func latestVersion(a availableJSON) string {
 	return ""
 }
 
-// isVersionRef reports whether ref looks like a version tag: a digit,
-// optionally after a leading "v" (e.g. "1.2.3", "v1.5.5").
+// isVersionRef reports whether ref looks like a version tag: dotted numbers,
+// optionally after a leading "v" and optionally with a "-suffix" pre-release
+// part (e.g. "1.2.3", "v1.5.5", "2.0.0-rc1"). At least one dot is required:
+// a bare leading digit is not enough, or branch names like "2024-rework"
+// would be shown as versions.
 func isVersionRef(ref string) bool {
 	ref = strings.TrimPrefix(ref, "v")
-	return ref != "" && ref[0] >= '0' && ref[0] <= '9'
+	dots := 0
+	for i := 0; ; {
+		start := i
+		for i < len(ref) && ref[i] >= '0' && ref[i] <= '9' {
+			i++
+		}
+		if i == start {
+			return false
+		}
+		if i == len(ref) {
+			return dots > 0
+		}
+		switch ref[i] {
+		case '.':
+			dots++
+			i++
+		case '-':
+			return dots > 0
+		default:
+			return false
+		}
+	}
 }

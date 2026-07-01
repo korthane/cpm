@@ -159,9 +159,60 @@ func TestMCPRemoveSuccessRefreshesProfile(t *testing.T) {
 
 	final, _ := got.Update(*loaded)
 	view := final.(Model).View()
-	// exa stays as a row (still in p1) but p0's cell is now absent.
-	if !strings.Contains(view, "—") {
-		t.Errorf("removed cell not shown as absent:\n%s", view)
+	// exa stays as a row (still in p1): its line must show p0's cell as
+	// absent next to p1's still-present target.
+	var exaLine string
+	for line := range strings.SplitSeq(view, "\n") {
+		if strings.Contains(line, "exa") {
+			exaLine = line
+			break
+		}
+	}
+	if exaLine == "" {
+		t.Fatalf("exa row missing after refresh:\n%s", view)
+	}
+	if !strings.Contains(exaLine, "—") || !strings.Contains(exaLine, "mcp.exa.ai") {
+		t.Errorf("exa row = %q, want an absent p0 cell next to p1's target", exaLine)
+	}
+}
+
+func TestMCPRemoveRefusesPluginProvidedServer(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := mcpModelWithServers(t, runner,
+		[]claudecli.MCPServer{{Name: "plugin:playwright:playwright", Target: "npx @playwright/mcp@latest"}})
+
+	m, cmd := press(t, m, "x")
+	if cmd != nil || m.pending != nil || len(mcpRemoveCalls(runner)) != 0 {
+		t.Fatal("remove of a plugin-provided server was not blocked")
+	}
+	if view := m.View(); !strings.Contains(view, "provided by a plugin") {
+		t.Errorf("plugin-provided hint missing:\n%s", view)
+	}
+}
+
+func TestMCPRemoveRefusesFlagLikeName(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := mcpModelWithServers(t, runner,
+		[]claudecli.MCPServer{{Name: "--evil", Target: "cmd"}})
+
+	m, cmd := press(t, m, "x")
+	if cmd != nil || m.pending != nil || len(mcpRemoveCalls(runner)) != 0 {
+		t.Fatal("flag-like server name was not blocked")
+	}
+	if view := m.View(); !strings.Contains(view, "looks like a CLI flag") {
+		t.Errorf("refusal hint missing:\n%s", view)
+	}
+}
+
+func TestMCPRemoveOnEmptyMatrixDoesNothing(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := mcpModelWithServers(t, runner, nil)
+
+	if _, cmd := press(t, m, "x"); cmd != nil {
+		t.Error("remove on an empty MCP matrix produced a command")
+	}
+	if len(mcpRemoveCalls(runner)) != 0 {
+		t.Fatalf("empty-matrix remove reached the CLI: %v", runner.Calls)
 	}
 }
 

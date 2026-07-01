@@ -46,6 +46,13 @@ func TestLoadConfig(t *testing.T) {
 			t.Fatal("expected error for malformed yaml")
 		}
 	})
+
+	t.Run("unreadable file is an error, not an empty config", func(t *testing.T) {
+		// A directory triggers a non-ENOENT read error.
+		if _, err := LoadConfig(t.TempDir()); err == nil {
+			t.Fatal("expected error for unreadable config path")
+		}
+	})
 }
 
 func TestAutoDiscover(t *testing.T) {

@@ -5,13 +5,11 @@ import (
 	"strings"
 )
 
-// MCPServer is one entry from `claude mcp list`: the server name, its target
-// (command line or URL), and the health-check status text (may be empty when
-// the CLI printed no status suffix).
+// MCPServer is one entry from `claude mcp list`: the server name and its
+// target (command line or URL).
 type MCPServer struct {
 	Name   string
 	Target string
-	Status string
 }
 
 // LoadMCP fetches and parses the MCP servers of one profile. `claude mcp list`
@@ -37,16 +35,16 @@ func ParseMCPList(out []byte) []MCPServer {
 		if !ok || strings.TrimSpace(name) == "" {
 			continue
 		}
-		// The status suffix is optional; split on the last " - " so targets
-		// containing " - " (unlikely but possible in args) stay intact.
-		target, status := rest, ""
+		// The optional health-status suffix is stripped from the target
+		// (the comparison view shows presence and target, not health);
+		// split on the last " - " so targets containing " - " stay intact.
+		target := rest
 		if i := strings.LastIndex(rest, " - "); i >= 0 {
-			target, status = rest[:i], rest[i+len(" - "):]
+			target = rest[:i]
 		}
 		servers = append(servers, MCPServer{
 			Name:   strings.TrimSpace(name),
 			Target: strings.TrimSpace(target),
-			Status: strings.TrimSpace(status),
 		})
 	}
 	return servers

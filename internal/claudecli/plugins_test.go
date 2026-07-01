@@ -84,6 +84,46 @@ func TestLoadPluginsFixture(t *testing.T) {
 	}
 }
 
+func TestLoadPluginsStringSourceWithoutVersion(t *testing.T) {
+	// A plain string source carries no ref; without a top-level version the
+	// entry must degrade to an unknown latest version, not an error.
+	f := &FakeRunner{Default: FakeResponse{Stdout: []byte(`{
+		"available": [{"pluginId": "x@m", "source": "./x"}]
+	}`)}}
+
+	got, err := LoadPlugins(t.Context(), f, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Available) != 1 || got.Available[0].LatestVersion != "" {
+		t.Errorf("Available = %+v, want one entry with empty LatestVersion", got.Available)
+	}
+}
+
+func TestIsVersionRef(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want bool
+	}{
+		{"1.2.3", true},
+		{"v1.5.5", true},
+		{"2.0.0-rc1", true},
+		{"1.2", true},
+		{"main", false},
+		{"2024-rework", false}, // digit-leading branch name, not a version
+		{"1", false},           // no dot: too ambiguous to show as a version
+		{"v2", false},
+		{"1.", false},
+		{"1.x", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isVersionRef(tt.ref); got != tt.want {
+			t.Errorf("isVersionRef(%q) = %v, want %v", tt.ref, got, tt.want)
+		}
+	}
+}
+
 func TestLoadPluginsDisabledPlugin(t *testing.T) {
 	f := &FakeRunner{Default: FakeResponse{Stdout: []byte(`{
 		"installed": [{"id": "dotfiles@olomix-cc-thingz", "version": "0.1.1", "enabled": false}],

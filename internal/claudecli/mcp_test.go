@@ -17,15 +17,16 @@ func TestParseMCPListFixture(t *testing.T) {
 		t.Fatalf("got %d servers, want 8:\n%+v", len(servers), servers)
 	}
 
+	// The health-status suffix is stripped from every target.
 	want := []MCPServer{
-		{Name: "claude.ai Exa", Target: "https://mcp.exa.ai/mcp", Status: "✔ Connected"},
-		{Name: "claude.ai Gmail", Target: "https://gmailmcp.googleapis.com/mcp/v1", Status: "✔ Connected"},
-		{Name: "claude.ai Google Drive", Target: "https://drivemcp.googleapis.com/mcp/v1", Status: "✔ Connected"},
-		{Name: "claude.ai Google Calendar", Target: "https://calendarmcp.googleapis.com/mcp/v1", Status: "✔ Connected"},
-		{Name: "plugin:playwright:playwright", Target: "npx @playwright/mcp@latest", Status: "✔ Connected"},
-		{Name: "swifteye", Target: "/Users/alek/src/swifteye/.build/release/swifteye", Status: "✔ Connected"},
-		{Name: "atlassian", Target: "https://mcp.atlassian.com/v1/mcp (HTTP)", Status: "✔ Connected"},
-		{Name: "macos_automator", Target: "npx -y @steipete/macos-automator-mcp@latest", Status: "✔ Connected"},
+		{Name: "claude.ai Exa", Target: "https://mcp.exa.ai/mcp"},
+		{Name: "claude.ai Gmail", Target: "https://gmailmcp.googleapis.com/mcp/v1"},
+		{Name: "claude.ai Google Drive", Target: "https://drivemcp.googleapis.com/mcp/v1"},
+		{Name: "claude.ai Google Calendar", Target: "https://calendarmcp.googleapis.com/mcp/v1"},
+		{Name: "plugin:playwright:playwright", Target: "npx @playwright/mcp@latest"},
+		{Name: "swifteye", Target: "/Users/alek/src/swifteye/.build/release/swifteye"},
+		{Name: "atlassian", Target: "https://mcp.atlassian.com/v1/mcp (HTTP)"},
+		{Name: "macos_automator", Target: "npx -y @steipete/macos-automator-mcp@latest"},
 	}
 	for i, w := range want {
 		if servers[i] != w {
@@ -58,7 +59,7 @@ func TestParseMCPListVariedLines(t *testing.T) {
 		{
 			name: "failed health check",
 			in:   "broken: http://localhost:1 - ✘ Failed to connect\n",
-			want: []MCPServer{{Name: "broken", Target: "http://localhost:1", Status: "✘ Failed to connect"}},
+			want: []MCPServer{{Name: "broken", Target: "http://localhost:1"}},
 		},
 		{
 			name: "missing status suffix",
@@ -68,7 +69,7 @@ func TestParseMCPListVariedLines(t *testing.T) {
 		{
 			name: "garbage lines skipped around a valid one",
 			in:   "???\nok: cmd - ✔ Connected\n---\n",
-			want: []MCPServer{{Name: "ok", Target: "cmd", Status: "✔ Connected"}},
+			want: []MCPServer{{Name: "ok", Target: "cmd"}},
 		},
 	}
 	for _, tt := range tests {

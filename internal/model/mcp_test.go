@@ -9,12 +9,12 @@ import (
 func TestBuildMCPMatrixUnionAcrossProfiles(t *testing.T) {
 	perProfile := [][]claudecli.MCPServer{
 		{
-			{Name: "exa", Target: "https://mcp.exa.ai/mcp", Status: "✔ Connected"},
-			{Name: "swifteye", Target: "/bin/swifteye", Status: "✔ Connected"},
+			{Name: "exa", Target: "https://mcp.exa.ai/mcp"},
+			{Name: "swifteye", Target: "/bin/swifteye"},
 		},
 		{
-			{Name: "exa", Target: "https://mcp.exa.ai/mcp", Status: "✘ Failed to connect"},
-			{Name: "atlassian", Target: "https://mcp.atlassian.com/v1/mcp", Status: "✔ Connected"},
+			{Name: "exa", Target: "https://mcp.exa.ai/mcp"},
+			{Name: "atlassian", Target: "https://mcp.atlassian.com/v1/mcp"},
 		},
 	}
 
@@ -41,12 +41,9 @@ func TestBuildMCPMatrixUnionAcrossProfiles(t *testing.T) {
 		t.Errorf("atlassian cell in profile 1 = %+v, want present with target", rows[0].Cells[1])
 	}
 
-	// exa: present in both, per-profile status preserved.
+	// exa: present in both.
 	if !rows[1].Cells[0].Present || !rows[1].Cells[1].Present {
 		t.Error("exa should be present in both profiles")
-	}
-	if rows[1].Cells[1].Status != "✘ Failed to connect" {
-		t.Errorf("exa status in profile 1 = %q, want the failed status", rows[1].Cells[1].Status)
 	}
 
 	// swifteye: present only in profile 0.

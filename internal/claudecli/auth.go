@@ -1,6 +1,7 @@
 package claudecli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,14 +21,23 @@ func LoadAuthStatus(ctx context.Context, r Runner, profileDir string) (AuthStatu
 	out, runErr := r.Run(ctx, profileDir, "auth", "status", "--json")
 
 	// A logged-out profile may exit non-zero while still printing valid
-	// JSON, so parseable stdout takes precedence over the exit status.
-	var status AuthStatus
-	parseErr := json.Unmarshal(out, &status)
-	if parseErr == nil {
-		return status, nil
+	// JSON, so a parseable JSON object takes precedence over the exit
+	// status. Requiring an object guards against stdout like `null`, which
+	// unmarshals into the zero value without error and would mask a real
+	// failure as a logged-out status.
+	trimmed := bytes.TrimSpace(out)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		var status AuthStatus
+		parseErr := json.Unmarshal(trimmed, &status)
+		if parseErr == nil {
+			return status, nil
+		}
+		if runErr == nil {
+			return AuthStatus{}, fmt.Errorf("parse auth status: %w", parseErr)
+		}
 	}
 	if runErr != nil {
 		return AuthStatus{}, runErr
 	}
-	return AuthStatus{}, fmt.Errorf("parse auth status: %w", parseErr)
+	return AuthStatus{}, fmt.Errorf("parse auth status: unexpected output %q", trimmed)
 }
