@@ -60,6 +60,13 @@ func BuildPluginMatrix(perProfile []claudecli.PluginData, latest map[claudecli.P
 				}
 				byID[p.ID] = row
 			}
+			// A profile can report the same plugin installed at two scopes
+			// (e.g. user and project); only "user" is actionable via cpm's
+			// --scope user-pinned CLI calls, so it wins a collision instead
+			// of whichever scope happened to come last in CLI output.
+			if row.Cells[i].State != Absent && row.Cells[i].Scope == "user" && p.Scope != "user" {
+				continue
+			}
 			state := Installed
 			if !p.Enabled {
 				state = Disabled

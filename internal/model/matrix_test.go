@@ -97,6 +97,38 @@ func TestBuildPluginMatrixCarriesScope(t *testing.T) {
 	}
 }
 
+func TestBuildPluginMatrixSameProfileScopeCollisionPrefersUser(t *testing.T) {
+	// A profile can report one plugin installed at two scopes at once. Only
+	// "user" is actionable via cpm's --scope user-pinned CLI calls, so it must
+	// win regardless of CLI output order instead of last-write-wins silently
+	// dropping the actionable entry.
+	projectFirst := []claudecli.PluginData{
+		{Installed: []claudecli.InstalledPlugin{
+			{ID: id("p", "m"), Version: "1.0.0", Enabled: true, Scope: "project"},
+			{ID: id("p", "m"), Version: "1.0.0", Enabled: true, Scope: "user"},
+		}},
+	}
+	userFirst := []claudecli.PluginData{
+		{Installed: []claudecli.InstalledPlugin{
+			{ID: id("p", "m"), Version: "1.0.0", Enabled: true, Scope: "user"},
+			{ID: id("p", "m"), Version: "1.0.0", Enabled: true, Scope: "project"},
+		}},
+	}
+
+	for name, perProfile := range map[string][]claudecli.PluginData{
+		"project-first": projectFirst,
+		"user-first":    userFirst,
+	} {
+		rows := BuildPluginMatrix(perProfile, nil)
+		if len(rows) != 1 {
+			t.Fatalf("%s: got %d rows, want 1", name, len(rows))
+		}
+		if got := rows[0].Cells[0].Scope; got != "user" {
+			t.Errorf("%s: cell scope = %q, want user", name, got)
+		}
+	}
+}
+
 func TestBuildPluginMatrixLatestVersionAndOutdated(t *testing.T) {
 	tests := []struct {
 		name         string

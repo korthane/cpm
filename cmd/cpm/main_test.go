@@ -21,6 +21,28 @@ func TestResolveProfilesFromArgs(t *testing.T) {
 	}
 }
 
+func TestResolveProfilesAbsoluteArgsSkipHomeResolution(t *testing.T) {
+	t.Setenv("HOME", "") // simulates an environment where $HOME is unset
+	p1 := t.TempDir()
+
+	profiles, err := resolveProfiles([]string{p1})
+	if err != nil {
+		t.Fatalf("resolveProfiles: %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].Path != p1 {
+		t.Fatalf("profiles = %+v, want %s", profiles, p1)
+	}
+}
+
+func TestResolveProfilesTildeArgRequiresHome(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	_, err := resolveProfiles([]string{"~/profile"})
+	if err == nil || !strings.Contains(err.Error(), "resolve home dir") {
+		t.Fatalf("resolveProfiles error = %v, want a resolve home dir error", err)
+	}
+}
+
 func TestResolveProfilesAutoDiscovers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
