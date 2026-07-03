@@ -75,6 +75,10 @@ func writeScript(t *testing.T, body string) string {
 }
 
 func TestRealRunnerSetsConfigDirAndArgs(t *testing.T) {
+	// An ambient CLAUDE_CONFIG_DIR (cpm itself launched with one exported)
+	// must lose to the profile's own dir, or every call would silently
+	// mutate the ambient profile instead.
+	t.Setenv("CLAUDE_CONFIG_DIR", "/ambient")
 	// The stub echoes the profile env var and its args so we can assert the
 	// realRunner wires both up correctly.
 	stub := writeScript(t, "#!/bin/sh\n"+
@@ -89,6 +93,9 @@ func TestRealRunnerSetsConfigDirAndArgs(t *testing.T) {
 	got := string(out)
 	if !strings.Contains(got, "config=/tmp/profile-x") {
 		t.Errorf("output %q missing config dir", got)
+	}
+	if strings.Contains(got, "/ambient") {
+		t.Errorf("output %q leaked the ambient config dir", got)
 	}
 	if !strings.Contains(got, "args=plugin list --json") {
 		t.Errorf("output %q missing args", got)

@@ -25,7 +25,14 @@ behavior.
 
 - `claudecli.FakeRunner` (in `fake.go`, not a `_test.go` file, so `config` and
   `ui` tests can inject it) returns canned responses keyed by the space-joined
-  args and records every call.
+  args and records every call. `ResponsesByDir` (consulted before `Responses`)
+  lets a test vary one command's answer per profile dir — needed when the same
+  args run against different dirs, e.g. the default-profile auth fallback.
+- Marketplace git lookups are stubbed by swapping the package var
+  `gitCommitInfo` (`internal/claudecli/gitinfo.go`, `stubGitCommitInfo`
+  helper); tests doing so must not use `t.Parallel()`. Any test whose fake
+  marketplace list carries a non-empty `installLocation` must stub it, or the
+  load's commit-info pass execs the real `git` against that path.
 - Real CLI output is captured as fixtures under `internal/claudecli/testdata/`.
 - UI behavior is tested by driving `Model.Update` directly with key/load
   messages and asserting on `View()` output; no TTY needed.
@@ -72,7 +79,14 @@ behavior.
 - Marketplaces have no version field, so the freshness signal is the commit
   hash/date of the clone, read by direct `git -C <installLocation> log -1`
   (not through Runner) during load. Git failure → blank cells so the UI can
-  tell "unknown" from a git-less directory source (shown as `local`).
+  tell "unknown" from a git-less directory source (shown as `local`). The
+  lookup sets `GIT_CEILING_DIRECTORIES` so a directory-source marketplace
+  nested inside a larger repo does not report the enclosing repo's HEAD.
+- A failed `plugin marketplace list` never fails the load, but it leaves the
+  profile's configured set unknown (`PluginData.MarketplacesUnknown`), which
+  is not the same as "none configured": the UI renders blank header cells
+  instead of `—` and refuses marketplace actions and implicit adds there —
+  a blind `marketplace add` could duplicate an existing marketplace.
 - macOS Keychain namespaces `claude` credentials by whether
   `CLAUDE_CONFIG_DIR` was set at login, so the default `~/.claude` profile
   can read as logged-out under cpm even though a plain `claude` login is

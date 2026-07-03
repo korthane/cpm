@@ -56,6 +56,11 @@ type PluginData struct {
 	// info filled from each clone. Nil when the list failed — marketplace
 	// metadata is best-effort and never fails a load.
 	Marketplaces []Marketplace
+	// MarketplacesUnknown is set when the marketplace list failed: nil
+	// Marketplaces then means "could not read", not "none configured", and
+	// the UI must not treat the profile's marketplaces as absent (a blind
+	// `marketplace add` could duplicate an existing one).
+	MarketplacesUnknown bool
 }
 
 type installedJSON struct {

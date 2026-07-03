@@ -417,8 +417,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col.status = statusLoading
 		col.err = nil
 		col.gen++
+		stale := col.latest.Stale
+		// A successful update of the profile's only marketplace refreshed
+		// every catalog the stale marker covers; with several marketplaces
+		// the others stay unrefreshed, so the conservative flag is kept.
+		if msg.err == nil && msg.verb == "update marketplace" && len(col.plugins.Marketplaces) == 1 {
+			stale = false
+		}
 		cmds := []tea.Cmd{
-			refreshProfile(m.runner, msg.index, col.gen, col.profile, col.latest.Stale),
+			refreshProfile(m.runner, msg.index, col.gen, col.profile, stale),
 			m.spinner.Tick,
 		}
 		// Plugin actions can add or remove plugin-provided MCP servers
@@ -697,6 +704,21 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 // one the install is refused as it was before implicit adds existed.
 func (m Model) startInstallWithAdd(id claudecli.PluginID, mkt model.MarketplaceRow) (tea.Model, tea.Cmd) {
 	col := m.columns[m.selCol]
+	// A failed marketplace list left the profile's configured set unknown;
+	// a blind add could duplicate an existing marketplace, so refuse.
+	if col.plugins.MarketplacesUnknown {
+		m.setStatus(fmt.Sprintf("cannot install %s in %s: marketplace state unknown — reload (r)",
+			id, col.profile.Label), true)
+		return m, nil
+	}
+	// The marketplace is configured but its catalog lacks the plugin (stale
+	// or diverged clone): adding again would fail as a duplicate, so fire
+	// the plain install and let the CLI resolve or report.
+	if mkt.Cells[m.selCol].Configured {
+		m.setStatus(fmt.Sprintf("install %s in %s…", id, col.profile.Label), false)
+		m.columns[m.selCol].busy = true
+		return m, runPluginAction(m.runner, m.selCol, col.profile.Path, id, "install")
+	}
 	if mkt.SourceConflict || mkt.SourceArg == "" {
 		m.setStatus(fmt.Sprintf("cannot install %s in %s: marketplace %q is not configured there"+
 			" (claude plugin marketplace add)", id, col.profile.Label, mkt.Name), true)
@@ -753,6 +775,14 @@ func (m Model) startMarketplaceAction(key string, row model.MarketplaceRow) (tea
 	}
 	if col.busy {
 		m.setStatus(col.profile.Label+" has an action in progress", true)
+		return m, nil
+	}
+	// A failed marketplace list left this profile's configured set unknown:
+	// the cell's Configured=false is not trustworthy, so any marketplace
+	// action could target the wrong state — refuse them all.
+	if col.plugins.MarketplacesUnknown {
+		m.setStatus(fmt.Sprintf("cannot %s %s: marketplace state unknown in %s — reload (r)",
+			verb, row.Name, col.profile.Label), true)
 		return m, nil
 	}
 	// Marketplace names and sources are third-party data passed as positional
@@ -1181,10 +1211,12 @@ func (c *column) groupColumn(idx int, groups []model.PluginGroup, refs []rowRef,
 // marketplaceCell renders one marketplace-header cell: the clone's commit
 // `hash date` when known, `local` for a directory source without git info,
 // `—` when the marketplace is not configured in this profile. Blank while
-// the column's data has not arrived, or when a non-directory source's git
-// lookup failed (blank means "unknown", which `local` would misstate).
+// the column's data has not arrived, when the profile's marketplace list
+// failed (Configured then reflects nothing), or when a non-directory
+// source's git lookup failed (blank means "unknown", which `local` or `—`
+// would misstate).
 func (c *column) marketplaceCell(cell model.MarketplaceCell) tableCell {
-	if c.status != statusLoaded {
+	if c.status != statusLoaded || c.plugins.MarketplacesUnknown {
 		return tableCell{}
 	}
 	switch {

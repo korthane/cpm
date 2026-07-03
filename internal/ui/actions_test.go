@@ -802,6 +802,53 @@ func TestInstallRefusesFlagLikeSourceArg(t *testing.T) {
 	}
 }
 
+func TestInstallSkipsAddWhenMarketplaceAlreadyConfigured(t *testing.T) {
+	// p1 has mp configured, but its catalog lacks foo (stale or diverged
+	// clone). Adding again would fail as a duplicate: the install must fire
+	// directly and let the CLI resolve or report.
+	runner := &claudecli.FakeRunner{}
+	p0 := withMarketplace(installedFoo(true), "mp", "a1b2c3", "2026-06-28")
+	p1 := withMarketplace(claudecli.PluginData{}, "mp", "d4e5f6", "2026-07-01")
+	m := modelWithCells(t, runner, p0, p1)
+	m, _ = press(t, m, "down")  // off the mp group header onto foo's row
+	m, _ = press(t, m, "right") // p1
+
+	m, cmd := press(t, m, "i")
+	if cmd == nil {
+		t.Fatal("install with a configured marketplace produced no command")
+	}
+	if !m.columns[1].busy {
+		t.Error("column not busy during the install")
+	}
+	cmd()
+	if got := marketplaceCalls(runner, "add"); len(got) != 0 {
+		t.Fatalf("install on a configured marketplace fired an add: %v", got)
+	}
+	installs := pluginCalls(runner, "install")
+	if len(installs) != 1 || installs[0].ProfileDir != "/h/p1" {
+		t.Fatalf("installs = %v, want one against /h/p1", installs)
+	}
+}
+
+func TestInstallRefusedWhenMarketplaceStateUnknown(t *testing.T) {
+	// p1's marketplace list failed: whether mp is configured there is
+	// unknown, so neither an add (possible duplicate) nor a bare install
+	// should fire.
+	runner := &claudecli.FakeRunner{}
+	p0 := withMarketplace(installedFoo(true), "mp", "a1b2c3", "2026-06-28")
+	m := modelWithCells(t, runner, p0, claudecli.PluginData{MarketplacesUnknown: true})
+	m, _ = press(t, m, "down")
+	m, _ = press(t, m, "right")
+
+	m, cmd := press(t, m, "i")
+	if cmd != nil || len(runner.Calls) != 0 {
+		t.Fatal("install with unknown marketplace state reached the CLI")
+	}
+	if view := m.View(); !strings.Contains(view, "marketplace state unknown") {
+		t.Errorf("refusal hint missing:\n%s", view)
+	}
+}
+
 func TestImplicitAddTimeoutIsUncertainAndReloads(t *testing.T) {
 	// Same contract as other actions: a timed-out add was killed mid-flight,
 	// so the write may have applied and the column must reload. The install
@@ -873,7 +920,9 @@ func TestActionKeysOnEmptyMatrixDoNothing(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, claudecli.PluginData{})
 
-	for _, key := range []string{"e", "d", "u", "x", "i"} {
+	// enter/space exercise the fold path's empty-refs guard: without it the
+	// row lookup indexes refs[-1] and panics.
+	for _, key := range []string{"e", "d", "u", "x", "i", "enter", "space"} {
 		if _, cmd := press(t, m, key); cmd != nil {
 			t.Errorf("key %q on an empty matrix produced a command", key)
 		}

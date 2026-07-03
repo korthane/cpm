@@ -3,7 +3,9 @@ package claudecli
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"testing"
 )
@@ -88,5 +90,33 @@ func TestGitCommitInfoNotARepo(t *testing.T) {
 	}
 	if _, _, err := gitCommitInfo(t.Context(), t.TempDir()); err == nil {
 		t.Fatal("expected error for a non-repo directory, got nil")
+	}
+}
+
+func TestGitCommitInfoIgnoresEnclosingRepo(t *testing.T) {
+	// A directory-source marketplace can live inside a larger repo (e.g. a
+	// dotfiles checkout); its freshness cell must not show the enclosing
+	// repo's HEAD, so discovery must not walk above the marketplace dir.
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"-c", "user.email=test@example.com", "-c", "user.name=test",
+			"-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "initial"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	nested := filepath.Join(repo, "marketplace")
+	if err := os.Mkdir(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := gitCommitInfo(t.Context(), nested); err == nil {
+		t.Fatal("expected error for a non-repo dir inside a repo, got nil")
 	}
 }

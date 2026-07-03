@@ -12,7 +12,9 @@ rightmost identity column, one row per resource. Two tabs:
   folds/unfolds) whose cells show the git commit hash and date of the
   marketplace clone per profile — marketplaces have no version, so commit
   freshness is the signal (`local` for a directory source without git info,
-  `—` where the marketplace is not configured). Below it, every
+  `—` where the marketplace is not configured, blank when the state could
+  not be read — the git lookup or the marketplace listing failed). Below it,
+  every
   `plugin@marketplace` seen in any profile: its state in each profile
   (`vX.Y.Z`, `disabled (vX.Y.Z)`, or `—` when absent) and the latest
   available version in the pinned column. Versions behind latest are
@@ -39,6 +41,11 @@ cpm never edits Claude's internal JSON files directly.
 ## Requirements
 
 - The `claude` CLI must be on `PATH` — every read and action shells out to it.
+- `git` on `PATH` is optional but recommended: marketplace freshness (commit
+  hash and date) is read from each clone with `git log`; without it those
+  header cells stay blank.
+- The fold chevrons are NerdFont glyphs; without a NerdFont-patched terminal
+  font they render as replacement boxes (cosmetic only).
 - Go 1.26.4+ to build from source.
 
 ## Install / build

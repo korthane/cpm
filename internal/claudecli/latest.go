@@ -100,12 +100,14 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 
 	// Marketplace metadata is best-effort: a failed list leaves Marketplaces
 	// nil instead of failing the load, and the version fallback below then
-	// has nothing to read catalogs from.
+	// has nothing to read catalogs from. MarketplacesUnknown records the
+	// failure so the UI can tell "could not read" from "none configured".
 	markets, mErr := ListMarketplaces(ctx, r, profileDir)
 	if mErr == nil {
 		fillCommitInfo(ctx, markets)
 		data.Marketplaces = markets
 	}
+	data.MarketplacesUnknown = mErr != nil
 
 	lv := LatestVersions{Versions: map[PluginID]string{}}
 	for _, a := range data.Available {

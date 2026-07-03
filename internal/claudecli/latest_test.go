@@ -205,6 +205,9 @@ func TestLoadPluginsCachedPopulatesMarketplaces(t *testing.T) {
 			t.Errorf("Marketplaces[%d] = %+v, want %+v", i, data.Marketplaces[i], want[i])
 		}
 	}
+	if data.MarketplacesUnknown {
+		t.Error("MarketplacesUnknown = true, want false after a successful list")
+	}
 	for _, c := range f.Calls {
 		if strings.Join(c.Args, " ") == "plugin marketplace list --json" && c.ProfileDir != "/home/u/.claude" {
 			t.Errorf("marketplace list profile dir = %q, want /home/u/.claude", c.ProfileDir)
@@ -257,6 +260,9 @@ func TestLoadPluginsCachedMarketplaceListFailureIsBestEffort(t *testing.T) {
 	}
 	if data.Marketplaces != nil {
 		t.Errorf("Marketplaces = %+v, want nil on list failure", data.Marketplaces)
+	}
+	if !data.MarketplacesUnknown {
+		t.Error("MarketplacesUnknown = false, want true on list failure")
 	}
 }
 
@@ -368,6 +374,11 @@ func TestLoadPluginsFreshStaleOnRefreshFailure(t *testing.T) {
 }
 
 func TestLoadPluginsFreshCatalogFileFallback(t *testing.T) {
+	// Keep the load's commit-info pass off the real git binary: the temp dirs
+	// used here are not repos, and an ambient enclosing repo must not leak in.
+	stubGitCommitInfo(t, func(context.Context, string) (string, string, error) {
+		return "", "", errors.New("not a git repository")
+	})
 	dir := t.TempDir()
 	writeCatalog(t, dir, `{
 		"name": "m1",
@@ -409,6 +420,11 @@ func TestLoadPluginsFreshCatalogFileFallback(t *testing.T) {
 }
 
 func TestLoadPluginsFreshFallbackIsBestEffort(t *testing.T) {
+	// Keep the load's commit-info pass off the real git binary; the fake
+	// install locations here are not repos.
+	stubGitCommitInfo(t, func(context.Context, string) (string, string, error) {
+		return "", "", errors.New("not a git repository")
+	})
 	available := FakeResponse{Stdout: []byte(`{
 		"available": [{"pluginId": "a@m1", "source": {"source": "github"}}]
 	}`)}

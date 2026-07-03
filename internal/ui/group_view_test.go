@@ -80,6 +80,11 @@ func TestMarketplaceCellRendering(t *testing.T) {
 		{"directory source without git info", loaded,
 			model.MarketplaceCell{Configured: true, Local: true}, "local"},
 		{"git lookup failed", loaded, model.MarketplaceCell{Configured: true}, ""},
+		// A failed marketplace list means Configured reflects nothing: blank
+		// ("unknown"), not — ("not configured").
+		{"marketplace list failed",
+			&column{status: statusLoaded, plugins: claudecli.PluginData{MarketplacesUnknown: true}},
+			model.MarketplaceCell{}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,6 +136,26 @@ func TestFoldCollapsesGroupAndUnfoldRestores(t *testing.T) {
 				t.Errorf("unfold did not restore the plugin rows:\n%s", view)
 			}
 		})
+	}
+}
+
+func TestFoldSurvivesReload(t *testing.T) {
+	p0 := withMarketplace(installedIn("mp", "bar", "baz"), "mp", "a1b2c3", "2026-06-28")
+	m := modelWithCells(t, &claudecli.FakeRunner{}, p0)
+	m, _ = press(t, m, "enter") // fold mp at selRow 0
+	if m.rowCount() != 1 {
+		t.Fatalf("rowCount after fold = %d, want 1", m.rowCount())
+	}
+
+	// Every completed action reloads its column; the fold state is keyed by
+	// marketplace name (not group index) so fresh data must land folded.
+	loaded, _ := m.Update(profileLoadedMsg{index: 0, gen: m.columns[0].gen, plugins: p0})
+	m = loaded.(Model)
+	if m.rowCount() != 1 {
+		t.Errorf("rowCount after reload = %d, want 1 (reload unfolded the group)", m.rowCount())
+	}
+	if view := m.View(); !strings.Contains(view, chevronFolded+" mp (2 plugins)") {
+		t.Errorf("reload lost the fold state:\n%s", view)
 	}
 }
 

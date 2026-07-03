@@ -2,7 +2,9 @@ package claudecli
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -12,7 +14,13 @@ import (
 // CLAUDE_CONFIG_DIR. The context bounds it with the caller's load budget. A
 // package var so tests can stub it.
 var gitCommitInfo = func(ctx context.Context, dir string) (hash, date string, err error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "log", "-1", "--format=%h %cs").Output()
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "log", "-1", "--format=%h %cs")
+	// Without a ceiling, repo discovery walks up from dir, so a
+	// directory-source marketplace nested inside a larger repo would report
+	// the enclosing repo's HEAD as the marketplace's freshness. Only a repo
+	// rooted at dir itself counts; anything else stays a blank cell.
+	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
+	out, err := cmd.Output()
 	if err != nil {
 		return "", "", err
 	}

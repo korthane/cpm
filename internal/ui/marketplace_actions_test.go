@@ -194,6 +194,117 @@ func TestMarketplaceUpdateAndRemoveRefusedWhenNotConfigured(t *testing.T) {
 	}
 }
 
+func TestMarketplaceActionsRefusedWhenStateUnknown(t *testing.T) {
+	// The profile's marketplace list failed: Configured=false on its cells
+	// reflects nothing, so add could duplicate an existing marketplace and
+	// update/remove could target one that is actually there — refuse all.
+	for _, key := range []string{"i", "u", "x"} {
+		t.Run(key, func(t *testing.T) {
+			runner := &claudecli.FakeRunner{}
+			data := installedFoo(true) // the mp group exists via the installed plugin
+			data.MarketplacesUnknown = true
+			m := modelWithCells(t, runner, data)
+
+			m, cmd := press(t, m, key)
+			if cmd != nil || len(runner.Calls) != 0 {
+				t.Fatalf("key %q with unknown marketplace state acted", key)
+			}
+			view := m.View()
+			if !strings.Contains(view, "marketplace state unknown") {
+				t.Errorf("hint missing:\n%s", view)
+			}
+			if strings.Contains(view, "y/n") {
+				t.Errorf("refused remove still armed the confirmation:\n%s", view)
+			}
+		})
+	}
+}
+
+func TestMarketplaceActionRefreshReloadsStartedMCPTab(t *testing.T) {
+	// A marketplace remove can uninstall plugins that provide
+	// plugin:<plugin>:<name> MCP servers, so a loaded MCP tab must reload
+	// the acted-on column, exactly like plugin actions.
+	runner := &claudecli.FakeRunner{}
+	p0 := withMarketplace(installedFoo(true), "mp", "a1b2c3", "2026-06-28")
+	m := modelWithCells(t, runner, p0)
+	m, _ = press(t, m, "tab") // starts the lazy MCP load
+	loaded, _ := m.Update(mcpLoadedMsg{index: 0, gen: m.columns[0].mcpGen,
+		servers: []claudecli.MCPServer{{Name: "plugin:foo:srv", Target: "stdio"}}})
+	m = loaded.(Model)
+	m, _ = press(t, m, "tab") // back to plugins; row 0 is the mp header
+
+	m, _ = press(t, m, "x") // arm the remove confirmation
+	m, cmd := press(t, m, "y")
+	if cmd == nil {
+		t.Fatal("confirmed remove produced no command")
+	}
+	updated, refresh := m.Update(cmd())
+	got := updated.(Model)
+
+	if got.columns[0].mcpStatus != statusLoading {
+		t.Errorf("mcpStatus = %v, want loading after marketplace remove", got.columns[0].mcpStatus)
+	}
+	var mcpReloaded bool
+	for _, msg := range drain(t, refresh) {
+		if l, ok := msg.(mcpLoadedMsg); ok && l.gen == got.columns[0].mcpGen {
+			mcpReloaded = true
+		}
+	}
+	if !mcpReloaded {
+		t.Error("post-remove refresh fired no MCP reload for the acted column")
+	}
+}
+
+func TestSuccessfulSingleMarketplaceUpdateClearsStale(t *testing.T) {
+	// The stale marker comes from a failed bulk refresh during load; a
+	// successful per-marketplace update of the profile's ONLY marketplace
+	// freshened everything the marker covers, so the refresh must drop it.
+	runner := &claudecli.FakeRunner{Responses: map[string]claudecli.FakeResponse{
+		"plugin list --available --json": {Stdout: []byte(`{"installed":[],"available":[]}`)},
+		"plugin marketplace list --json": {Stdout: []byte(`[{"name":"mp","source":"github","repo":"owner/mp"}]`)},
+	}}
+	p0 := withMarketplace(claudecli.PluginData{}, "mp", "a1b2c3", "2026-06-28")
+	m := modelWithCells(t, runner, p0)
+	m.columns[0].latest.Stale = true
+
+	updated, refresh := m.Update(actionDoneMsg{index: 0, verb: "update marketplace", target: "mp"})
+	m = updated.(Model)
+	var stale, found bool
+	for _, msg := range drain(t, refresh) {
+		if l, ok := msg.(profileLoadedMsg); ok {
+			found, stale = true, l.latest.Stale
+		}
+	}
+	if !found {
+		t.Fatal("post-update refresh produced no profile load")
+	}
+	if stale {
+		t.Error("Stale still set after a successful update of the only marketplace")
+	}
+}
+
+func TestSuccessfulUpdateKeepsStaleWithOtherMarketplaces(t *testing.T) {
+	// Only one of the profile's two marketplaces was updated; the other's
+	// catalog is still whatever the failed bulk refresh left behind, so the
+	// conservative stale marker must survive.
+	runner := &claudecli.FakeRunner{Responses: map[string]claudecli.FakeResponse{
+		"plugin list --available --json": {Stdout: []byte(`{"installed":[],"available":[]}`)},
+		"plugin marketplace list --json": {Stdout: []byte(`[{"name":"mp","source":"github","repo":"owner/mp"}]`)},
+	}}
+	p0 := withMarketplace(withMarketplace(claudecli.PluginData{}, "mp", "a1b2c3", "2026-06-28"),
+		"mp2", "d4e5f6", "2026-07-01")
+	m := modelWithCells(t, runner, p0)
+	m.columns[0].latest.Stale = true
+
+	updated, refresh := m.Update(actionDoneMsg{index: 0, verb: "update marketplace", target: "mp"})
+	m = updated.(Model)
+	for _, msg := range drain(t, refresh) {
+		if l, ok := msg.(profileLoadedMsg); ok && !l.latest.Stale {
+			t.Error("Stale dropped although a second marketplace stayed unrefreshed")
+		}
+	}
+}
+
 func TestMarketplaceActionRefusesFlagLikeName(t *testing.T) {
 	for _, key := range []string{"u", "x"} {
 		t.Run(key, func(t *testing.T) {
