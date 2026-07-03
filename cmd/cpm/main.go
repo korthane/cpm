@@ -53,19 +53,21 @@ func resolveProfiles(cliArgs []string) ([]config.Profile, error) {
 		}
 	}
 
-	// $HOME is only needed for config/auto-discover lookup and for expanding
-	// a leading "~" in an explicit arg; an absolute-path arg needs neither, so
-	// an unresolvable $HOME (e.g. a minimal container) must not block it.
-	var home string
-	var cfg config.Config
-	var discovered []config.Profile
-	if len(cliArgs) == 0 || needsHome(cliArgs) {
-		var err error
-		home, err = os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve home dir: %w", err)
+	// $HOME resolution is best-effort: normalize needs it to mark the
+	// ~/.claude profile IsDefault (the Keychain auth fallback) even when all
+	// args are absolute paths. It is only *required* for config/auto-discover
+	// lookup and for expanding a leading "~" in an explicit arg, so an
+	// unresolvable $HOME (e.g. a minimal container) must not block an
+	// absolute-path invocation.
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		home = ""
+		if len(cliArgs) == 0 || needsHome(cliArgs) {
+			return nil, fmt.Errorf("resolve home dir: %w", homeErr)
 		}
 	}
+	var cfg config.Config
+	var discovered []config.Profile
 	if len(cliArgs) == 0 {
 		var err error
 		cfg, err = config.LoadConfig(filepath.Join(home, ".config", "cpm", "config.yaml"))

@@ -34,6 +34,26 @@ func TestResolveProfilesAbsoluteArgsSkipHomeResolution(t *testing.T) {
 	}
 }
 
+func TestResolveProfilesAbsoluteArgDetectsDefault(t *testing.T) {
+	// Home must be resolved even when no arg needs ~ expansion: the default
+	// ~/.claude profile passed as an absolute path still needs IsDefault for
+	// the Keychain auth fallback.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".claude")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	profiles, err := resolveProfiles([]string{dir})
+	if err != nil {
+		t.Fatalf("resolveProfiles: %v", err)
+	}
+	if len(profiles) != 1 || !profiles[0].IsDefault {
+		t.Fatalf("profiles = %+v, want a single default profile", profiles)
+	}
+}
+
 func TestResolveProfilesTildeArgRequiresHome(t *testing.T) {
 	t.Setenv("HOME", "")
 

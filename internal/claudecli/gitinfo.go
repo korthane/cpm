@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -19,7 +20,20 @@ var gitCommitInfo = func(ctx context.Context, dir string) (hash, date string, er
 	// directory-source marketplace nested inside a larger repo would report
 	// the enclosing repo's HEAD as the marketplace's freshness. Only a repo
 	// rooted at dir itself counts; anything else stays a blank cell.
-	cmd.Env = append(os.Environ(), "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
+	// The ceiling only constrains discovery, though: ambient repo-selection
+	// vars (GIT_DIR from a bare-repo dotfiles setup, GIT_WORK_TREE, ...)
+	// skip discovery entirely and would pin every lookup to that one repo,
+	// so they are stripped first.
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		for _, name := range []string{"GIT_DIR=", "GIT_WORK_TREE=", "GIT_INDEX_FILE=",
+			"GIT_COMMON_DIR=", "GIT_OBJECT_DIRECTORY=", "GIT_CEILING_DIRECTORIES="} {
+			if strings.HasPrefix(kv, name) {
+				return true
+			}
+		}
+		return false
+	})
+	cmd.Env = append(env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(dir))
 	out, err := cmd.Output()
 	if err != nil {
 		return "", "", err

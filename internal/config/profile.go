@@ -109,8 +109,14 @@ func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir
 // variants like `~/.claude`, `~/.claude/`, or a symlink to it cannot become two
 // columns independently mutating one config dir.
 func normalize(profiles []Profile, homeDir string) ([]Profile, error) {
-	defaultDir := filepath.Join(homeDir, ".claude")
-	defaultPath := seenPath{key: dedupKey(defaultDir), info: statOrNil(defaultDir)}
+	// With an unresolvable home there is nothing to compare against; skipping
+	// detection beats matching the relative ".claude" (a cwd-local dir passed
+	// as an arg would otherwise be mistaken for the default profile).
+	var defaultPath []seenPath
+	if homeDir != "" {
+		defaultDir := filepath.Join(homeDir, ".claude")
+		defaultPath = []seenPath{{key: dedupKey(defaultDir), info: statOrNil(defaultDir)}}
+	}
 	var seen []seenPath
 	out := make([]Profile, 0, len(profiles))
 	for _, p := range profiles {
@@ -132,7 +138,7 @@ func normalize(profiles []Profile, homeDir string) ([]Profile, error) {
 		out = append(out, Profile{
 			Path:      path,
 			Label:     cmp.Or(p.Label, filepath.Base(path)),
-			IsDefault: isDuplicate([]seenPath{defaultPath}, candidate),
+			IsDefault: isDuplicate(defaultPath, candidate),
 		})
 	}
 	return out, nil

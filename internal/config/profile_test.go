@@ -345,6 +345,23 @@ func TestResolveProfilesIsDefault(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("empty home skips default detection", func(t *testing.T) {
+		// With an unresolvable home the comparison target would be the
+		// relative ".claude" — a cwd-local dir passed as an arg must not be
+		// mistaken for the default profile.
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveProfiles([]string{filepath.Join(cwd, ".claude")}, Config{}, nil, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || got[0].IsDefault {
+			t.Fatalf("got %+v, want a single non-default profile", got)
+		}
+	})
 }
 
 func mustMkdir(t *testing.T, path string) {
