@@ -218,7 +218,7 @@ func TestActionTimeoutRefreshesProfile(t *testing.T) {
 	m := modelWithCells(t, runner, installedFoo(true))
 
 	updated, refresh := m.Update(actionDoneMsg{
-		index: 0, verb: "update", plugin: fooID,
+		index: 0, verb: "update", target: fooID.String(),
 		err: errors.New("signal: killed"), uncertain: true,
 	})
 	got := updated.(Model)
@@ -300,6 +300,7 @@ func TestEveryUIFiredCommandCarriesTimeout(t *testing.T) {
 	loadMCPProfile(r, 0, 1, "/h/p0")()
 	runPluginAction(r, 0, "/h/p0", fooID, "update")()
 	runMCPRemove(r, 0, "/h/p0", "exa")()
+	runMarketplaceAction(r, 0, "/h/p0", "update", "mp", "")()
 
 	if r.calls == 0 {
 		t.Fatal("no CLI calls recorded")

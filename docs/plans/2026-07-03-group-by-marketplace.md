@@ -210,7 +210,7 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 8: Marketplace actions (add / update / remove)
 
-- [ ] write failing UI tests: on a marketplace row, `i` runs
+- [x] write failing UI tests: on a marketplace row, `i` runs
       `plugin marketplace add <sourceArg> --scope user` on the selected
       profile (refused when already configured, `SourceConflict`, empty
       `sourceArg`, or arg starting with `-`); `u` runs
@@ -220,10 +220,16 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
       mandatory — omitting removes from ALL scopes); `e`/`d` are no-ops on
       marketplace rows; busy-gating and timeout→uncertain→forced reload
       match plugin action semantics
-- [ ] extend `startAction`/`actionVerbs`/`pendingAction` dispatch in
+      (`internal/ui/marketplace_actions_test.go`)
+- [x] extend `startAction`/`actionVerbs`/`pendingAction` dispatch in
       `internal/ui/app.go` to branch on selected row kind; add
       `runMarketplaceAction` mirroring `runPluginAction`
-- [ ] run tests — must pass before task 9
+      (➕ deviation: marketplace keys map via a separate `marketplaceVerbs`
+      instead of extending `actionVerbs`, and marketplace results reuse
+      `actionDoneMsg` — its `plugin claudecli.PluginID` field generalized
+      to `target string` — so busy-clearing, refresh, and MCP-reload
+      semantics are shared instead of duplicated)
+- [x] run tests — must pass before task 9
 
 ### Task 9: Implicit marketplace add before plugin install
 

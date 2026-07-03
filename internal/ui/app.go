@@ -111,11 +111,13 @@ type Model struct {
 // pendingAction is an action held back behind the confirmation prompt.
 type pendingAction struct {
 	verb string
-	// target is the plugin id or MCP server name the action applies to; mcp
-	// says which, and thereby which CLI command a confirmation fires.
-	target string
-	mcp    bool
-	col    int
+	// target is the plugin id, MCP server name, or marketplace name the action
+	// applies to; mcp/marketplace say which, and thereby which CLI command a
+	// confirmation fires.
+	target      string
+	mcp         bool
+	marketplace bool
+	col         int
 }
 
 // New builds the root model for the given profiles. All columns start in the
@@ -165,13 +167,14 @@ type mcpErrMsg struct {
 	err   error
 }
 
-// actionDoneMsg reports a finished plugin action against one profile.
-// uncertain marks a timed-out action: the CLI was killed mid-flight, so the
-// write may have (partially) applied and the column data cannot be trusted.
+// actionDoneMsg reports a finished plugin or marketplace action against one
+// profile; target is the plugin id or marketplace name. uncertain marks a
+// timed-out action: the CLI was killed mid-flight, so the write may have
+// (partially) applied and the column data cannot be trusted.
 type actionDoneMsg struct {
 	index     int
 	verb      string
-	plugin    claudecli.PluginID
+	target    string
 	err       error
 	uncertain bool
 }
@@ -383,7 +386,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col.busy = false
 		if msg.err != nil {
 			m.setStatus(fmt.Sprintf("%s %s in %s failed: %v",
-				msg.verb, msg.plugin, col.profile.Label, msg.err), true)
+				msg.verb, msg.target, col.profile.Label, msg.err), true)
 			// A CLI-reported failure changed nothing, so the column's data
 			// stays valid. A timed-out action may have (partially) applied
 			// before the kill, so the column must be reloaded.
@@ -392,7 +395,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.setStatus(fmt.Sprintf("%s %s in %s: done",
-				msg.verb, msg.plugin, col.profile.Label), false)
+				msg.verb, msg.target, col.profile.Label), false)
 		}
 		col.status = statusLoading
 		col.err = nil
@@ -577,6 +580,9 @@ func (m Model) handleConfirmKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if p.mcp {
 		return m, runMCPRemove(m.runner, p.col, col.profile.Path, p.target)
 	}
+	if p.marketplace {
+		return m, runMarketplaceAction(m.runner, p.col, col.profile.Path, "remove", p.target, "")
+	}
 	return m, runPluginAction(m.runner, p.col, col.profile.Path,
 		claudecli.ParsePluginID(p.target), p.verb)
 }
@@ -602,8 +608,8 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 	}
 	ref := refs[min(m.selRow, len(refs)-1)]
 	// Marketplace header rows carry their own action set, not the plugin one.
-	if ref.kind != rowPlugin {
-		return m, nil
+	if ref.kind == rowMarketplace {
+		return m.startMarketplaceAction(key, groups[ref.group].Marketplace)
 	}
 	row := groups[ref.group].Plugins[ref.plugin]
 	col := m.columns[m.selCol]
@@ -647,6 +653,100 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 	m.setStatus(fmt.Sprintf("%s %s in %s…", verb, row.ID, col.profile.Label), false)
 	m.columns[m.selCol].busy = true
 	return m, runPluginAction(m.runner, m.selCol, col.profile.Path, row.ID, verb)
+}
+
+// marketplaceVerbs maps an action key to its `plugin marketplace <verb>`
+// subcommand; enable/disable have no marketplace equivalent, so e/d are
+// no-ops on marketplace rows.
+var marketplaceVerbs = map[string]string{
+	"i": "add",
+	"u": "update",
+	"x": "remove",
+}
+
+// startMarketplaceAction validates the selected marketplace cell for the
+// pressed action key and either fires the CLI command, or (for remove) arms
+// the confirmation prompt first.
+func (m Model) startMarketplaceAction(key string, row model.MarketplaceRow) (tea.Model, tea.Cmd) {
+	verb, ok := marketplaceVerbs[key]
+	if !ok {
+		return m, nil
+	}
+	col := m.columns[m.selCol]
+	if col.status != statusLoaded {
+		m.setStatus(col.profile.Label+" is not loaded yet", true)
+		return m, nil
+	}
+	if col.busy {
+		m.setStatus(col.profile.Label+" has an action in progress", true)
+		return m, nil
+	}
+	// Marketplace names and sources are third-party data passed as positional
+	// args; refuse anything the claude CLI would parse as a flag.
+	if strings.HasPrefix(row.Name, "-") || (verb == "add" && strings.HasPrefix(row.SourceArg, "-")) {
+		m.setStatus(fmt.Sprintf("refusing %s: marketplace %s looks like a CLI flag",
+			verb, row.Name), true)
+		return m, nil
+	}
+	cell := row.Cells[m.selCol]
+	switch verb {
+	case "add":
+		switch {
+		case cell.Configured:
+			m.setStatus(fmt.Sprintf("marketplace %s is already configured in %s",
+				row.Name, col.profile.Label), true)
+			return m, nil
+		case row.SourceConflict:
+			m.setStatus(fmt.Sprintf("cannot add %s: profiles disagree on its source", row.Name), true)
+			return m, nil
+		case row.SourceArg == "":
+			m.setStatus(fmt.Sprintf("cannot add %s: no known source", row.Name), true)
+			return m, nil
+		}
+	default: // update, remove
+		if !cell.Configured {
+			m.setStatus(fmt.Sprintf("cannot %s %s: not configured in %s",
+				verb, row.Name, col.profile.Label), true)
+			return m, nil
+		}
+	}
+	// Remove is destructive (it can drop the marketplace's installed plugins),
+	// so it is always confirmation-gated, like plugin uninstall.
+	if verb == "remove" {
+		m.pending = &pendingAction{verb: "remove marketplace", target: row.Name,
+			marketplace: true, col: m.selCol}
+		return m, nil
+	}
+	m.setStatus(fmt.Sprintf("%s marketplace %s in %s…", verb, row.Name, col.profile.Label), false)
+	m.columns[m.selCol].busy = true
+	return m, runMarketplaceAction(m.runner, m.selCol, col.profile.Path, verb, row.Name, row.SourceArg)
+}
+
+// runMarketplaceAction fires one `plugin marketplace <verb>` invocation; its
+// result reuses actionDoneMsg, so the busy-clearing, refresh, and MCP-reload
+// semantics match plugin actions.
+func runMarketplaceAction(r claudecli.Runner, index int, profileDir, verb, name, sourceArg string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		var args []string
+		switch verb {
+		case "add":
+			// Scope is pinned to user so the add lands in the profile's own
+			// config, matching every other mutation cpm fires.
+			args = []string{"plugin", "marketplace", "add", sourceArg, "--scope", "user"}
+		case "update":
+			// update has no scope flag in the CLI.
+			args = []string{"plugin", "marketplace", "update", name}
+		case "remove":
+			// --scope user is mandatory here: without it the CLI removes the
+			// marketplace from ALL scopes, not just this profile's config.
+			args = []string{"plugin", "marketplace", "remove", name, "--scope", "user"}
+		}
+		_, err := r.Run(ctx, profileDir, args...)
+		return actionDoneMsg{index: index, verb: verb + " marketplace", target: name, err: err,
+			uncertain: err != nil && ctx.Err() != nil}
+	}
 }
 
 // hasAvailable reports whether the plugin appears in the profile's own
@@ -756,7 +856,7 @@ func runPluginAction(r claudecli.Runner, index int, profileDir string,
 		// (cwd-dependent, shown identically in every column) would silently
 		// mutate config shared by all profiles.
 		_, err := r.Run(ctx, profileDir, "plugin", verb, "--scope", "user", plugin.String())
-		return actionDoneMsg{index: index, verb: verb, plugin: plugin, err: err,
+		return actionDoneMsg{index: index, verb: verb, target: plugin.String(), err: err,
 			uncertain: err != nil && ctx.Err() != nil}
 	}
 }
