@@ -1,0 +1,5 @@
+- [ ] when I navigate the plugin versions, I want the row to highlight.
+- [ ] I want to group by markektplace to save the space
+- [ ] tha path in the header can show ~/.claude instead of /Users/username/.claude to save the space
+- [ ] not all plugins latest version shows
+- [ ] update the marketplace

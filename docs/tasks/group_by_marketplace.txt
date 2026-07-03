@@ -1,0 +1,34 @@
+Now the list of plugins looks like
+```
+superpowers@claude-plugins-official
+swift-lsp@claude-plugins-official
+revdiff@revdiff
+revdiff-planning@revdiff
+```
+it takes horizontal space. 
+we can group the my marketplace like
+```
++/- claude-plugins-official:
+superpowers
+swift-lsp
++/- revdiff:
+revdiff
+revdiff-planning
+```
+
+this way we can implement 3 other things:
+1. fold/unfold the plugins by marketplace. We need to select a correct NerdFont symbols or BubbleTeam wdiget for this.
+2. On the marketplace line we also can have the actions like install/uninstall/update the marketplace for the claude environment. Does the marketplace has the version or something like date updated to show the difference? 
+3. We have a bug, when we want to install the plugin on the env where marketplace is not installed, we have an error "cannot install revdiff@revdiff in .claude-evo: marketplace "revdiff" is not configured there (claude plugin marketplace add)". I prefere to install the marketplace implicitly. 
+4. I have another bug, it shows that the default profile ~/.claude is not logged in. I have made a research and found the following:
+On macOS, Claude Code stores OAuth credentials in the Keychain, and the service name depends on whether
+  CLAUDE_CONFIG_DIR is set:
+  - Unset (default): it uses the plain service name Claude Code-credentials — that's where your Max login lives, so claude auth status
+  shows you logged in.
+  - Explicitly set — even to ~/.claude, the same directory as the default: it uses a suffixed service name, Claude Code-credentials-<hash
+  of the config dir path>. 
+  In other words, "no CLAUDE_CONFIG_DIR" and "CLAUDE_CONFIG_DIR=~/.claude" are two different credential namespaces even though they resolve
+  to the same directory on disk. 
+
+
+About how to fix it, what if we check auth auth status for explicit dir first, and if it shows not login, recech the auth status without explicit dir specification for the default ~/.claude dir. 
