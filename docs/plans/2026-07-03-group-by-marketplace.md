@@ -261,15 +261,15 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 10: Verify acceptance criteria
 
-- [ ] verify all four spec items are implemented (walk the spec's
+- [x] verify all four spec items are implemented (walk the spec's
       sections 1–5 against the code)
-- [ ] verify edge cases: source conflict, empty source, directory-source
+- [x] verify edge cases: source conflict, empty source, directory-source
       marketplace, orphaned plugin, plugin-less marketplace, folded-group
       selection clamping, ambient `CLAUDE_CONFIG_DIR` stripping
-- [ ] run full test suite (`make test`) — all pass
-- [ ] run `make lint` — all issues fixed
-- [ ] verify coverage ≥80% on `internal/claudecli`, `internal/config`,
-      `internal/model`
+- [x] run full test suite (`make test`) — all pass
+- [x] run `make lint` — all issues fixed
+- [x] verify coverage ≥80% on `internal/claudecli`, `internal/config`,
+      `internal/model` (98.8% / 98.5% / 100%)
 
 ### Task 11: Update documentation
 
