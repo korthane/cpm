@@ -66,6 +66,20 @@ behavior.
 - Plugin IDs and MCP server names are third-party data passed to `claude` as
   positional args; the UI refuses names starting with `-` so they cannot be
   parsed as CLI flags.
+- `claude plugin marketplace remove` without `--scope user` removes the
+  marketplace from ALL scopes, not just the profile's config — cpm always
+  passes it (`add` pins it too; `marketplace update` has no scope flag).
+- Marketplaces have no version field, so the freshness signal is the commit
+  hash/date of the clone, read by direct `git -C <installLocation> log -1`
+  (not through Runner) during load. Git failure → blank cells so the UI can
+  tell "unknown" from a git-less directory source (shown as `local`).
+- macOS Keychain namespaces `claude` credentials by whether
+  `CLAUDE_CONFIG_DIR` was set at login, so the default `~/.claude` profile
+  can read as logged-out under cpm even though a plain `claude` login is
+  active. `loadAuth` (`internal/ui/app.go`) re-checks a clean logged-out
+  answer for `IsDefault` profiles with an empty profile dir — the runner
+  strips the ambient env var when the dir is empty — and a clean logged-in
+  fallback wins.
 - Outdated flags use a custom segment-wise numeric version compare in
   `internal/model` (leading `v` ignored, missing segment = 0, pre-release <
   release, empty never outdated, lexical fallback for non-numeric segments) —

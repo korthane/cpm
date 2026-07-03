@@ -273,10 +273,10 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 11: Update documentation
 
-- [ ] update README.md: grouped plugin view, fold keybinding, marketplace
+- [x] update README.md: grouped plugin view, fold keybinding, marketplace
       row actions and cell format, implicit marketplace add on install,
       default-profile auth fallback
-- [ ] update CLAUDE.md non-obvious constraints: marketplace remove needs
+- [x] update CLAUDE.md non-obvious constraints: marketplace remove needs
       `--scope user` (omitting removes from all scopes); marketplaces have
       no version — commit hash/date of the clone is the freshness signal;
       default-profile Keychain namespace quirk and the env-stripped

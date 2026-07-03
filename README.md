@@ -7,17 +7,28 @@ multiple **profiles** (distinct `CLAUDE_CONFIG_DIR` directories such as
 The core view is a comparison table: one column per profile plus a pinned
 rightmost identity column, one row per resource. Two tabs:
 
-- **Plugins** — for every `plugin@marketplace` seen in any profile, its state
-  in each profile (`vX.Y.Z`, `disabled (vX.Y.Z)`, or `—` when absent) and the
-  latest available version in the pinned column. Versions behind latest are
-  highlighted with a `↑` marker. Actions: enable, disable, update, uninstall,
-  and install into a profile where the plugin is missing.
+- **Plugins** — rows grouped by marketplace. Each group starts with a
+  marketplace header row (a NerdFont chevron shows its fold state; `enter`
+  folds/unfolds) whose cells show the git commit hash and date of the
+  marketplace clone per profile — marketplaces have no version, so commit
+  freshness is the signal (`local` for a directory source without git info,
+  `—` where the marketplace is not configured). Below it, every
+  `plugin@marketplace` seen in any profile: its state in each profile
+  (`vX.Y.Z`, `disabled (vX.Y.Z)`, or `—` when absent) and the latest
+  available version in the pinned column. Versions behind latest are
+  highlighted with a `↑` marker. Plugin actions: enable, disable, update,
+  uninstall, and install into a profile where the plugin is missing.
+  Marketplace actions: add, update, remove.
 - **MCP** — the same layout for MCP servers (presence and target per profile).
   MCP has no update concept; v1 supports viewing and removing servers.
 
 Each profile column header shows the directory path plus the account email and
 subscription plan for that profile. A logged-out profile shows `not logged in`;
-if the auth status cannot be read at all, the line stays blank.
+if the auth status cannot be read at all, the line stays blank. For the default
+`~/.claude` profile a logged-out answer is double-checked without
+`CLAUDE_CONFIG_DIR` set: macOS Keychain stores credentials under a different
+name depending on whether the variable was set at login, so a plain `claude`
+login would otherwise show up as logged out.
 
 cpm is a thin front end over the public `claude` CLI: all reads use
 `claude ... --json` (except `claude mcp list`, which has no JSON mode and is
@@ -116,7 +127,7 @@ kicks in); malformed YAML or an unknown key (e.g. `profile:` instead of
 | `r` | reload the active tab's data |
 | `q` / `ctrl+c` | quit |
 
-Plugins tab, applied to the selected cell:
+Plugins tab, on a plugin row, applied to the selected cell:
 
 | Key | Action |
 | --- | --- |
@@ -126,6 +137,18 @@ Plugins tab, applied to the selected cell:
 | `x` | uninstall (installed plugin; asks `y/n`) |
 | `i` | install into a profile where the plugin is absent |
 
+Plugins tab, on a marketplace header row:
+
+| Key | Action |
+| --- | --- |
+| `enter` / `space` | fold or unfold the group (folded headers show `(n plugins)`) |
+| `i` | add the marketplace to a profile where it is missing |
+| `u` | update the marketplace clone in the selected profile |
+| `x` | remove the marketplace from the selected profile (asks `y/n`) |
+
+Adding needs a usable source: it is refused when no profile knows the
+marketplace's source or when profiles disagree about it.
+
 MCP tab:
 
 | Key | Action |
@@ -134,15 +157,18 @@ MCP tab:
 | `i` | not supported in v1 — shows a hint to use `claude mcp add` directly |
 
 Action keys are validated against the cell state (e.g. `i` only works where
-the plugin is absent) and show a hint on mismatch. `i` also requires the
-plugin's marketplace to be configured in the target profile; otherwise cpm
-shows a hint to run `claude plugin marketplace add` there first. Destructive actions
+the plugin is absent) and show a hint on mismatch. Installing a plugin into a
+profile that lacks its marketplace adds the marketplace there first (when its
+source is known from another profile), then installs; without a usable source
+the install is refused with a hint. Destructive actions
 (`x` uninstall/remove) require a `y` confirmation; any other key cancels
 (`ctrl+c` still quits). After an action succeeds, only the affected profile's
 data is reloaded.
 
-All plugin actions run with `--scope user`, so they only ever edit the selected
-profile's own config. A plugin installed at project or local scope
+All plugin and marketplace mutations run with `--scope user`, so they only ever
+edit the selected profile's own config (`marketplace update` has no scope flag;
+for `marketplace remove` the flag is what keeps the removal from hitting every
+scope). A plugin installed at project or local scope
 (cwd-dependent, shown identically in every column) cannot be managed from cpm —
 actions on such rows are refused with a hint; use `claude plugin` in the owning
 directory instead.
