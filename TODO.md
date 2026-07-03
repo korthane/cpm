@@ -1,8 +1,7 @@
 - [x] when I navigate the plugin versions, I want the row to highlight.
-- [ ] I want to group by markektplace to save the space
+- [x] I want to group by markektplace to save the space
 - [ ] tha path in the header can show ~/.claude instead of /Users/username/.claude to save the space
-- [ ] not all plugins latest version shows
-- [ ] update the marketplace
+- [x] update the marketplace
 - [x] make j/k navigate rows
 - [x] make h/l navigate columns
 - [ ] not all plugins have versions. Why?
