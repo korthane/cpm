@@ -128,11 +128,15 @@ kicks in); malformed YAML or an unknown key (e.g. `profile:` instead of
 
 | Key | Action |
 | --- | --- |
-| `←` / `→` | select profile column (the table scrolls to keep it visible) |
-| `↑` / `↓` | select row (tall tables scroll to keep it visible) |
+| `←` / `→` / `h` / `l` | select profile column (the table scrolls to keep it visible) |
+| `↑` / `↓` / `j` / `k` | select row (tall tables scroll to keep it visible) |
 | `tab` / `shift+tab` | cycle between the Plugins and MCP tabs |
 | `r` | reload the active tab's data |
 | `q` / `ctrl+c` | quit |
+
+Besides the selected cell, the selected row's pinned name cell (marketplace,
+plugin, or MCP server name) is shown in reverse video, so the current row
+stays findable on wide tables.
 
 Plugins tab, on a plugin row, applied to the selected cell:
 

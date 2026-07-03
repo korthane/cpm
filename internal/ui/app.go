@@ -1005,7 +1005,7 @@ func (m Model) View() string {
 
 	b.WriteString("\n")
 	b.WriteString(m.statusLine())
-	b.WriteString("\n←/→ ↑/↓: select  tab: switch  r: reload  q: quit")
+	b.WriteString("\n←/→/h/l ↑/↓/j/k: select  tab: switch  r: reload  q: quit")
 	switch {
 	case m.tab == tabMCP:
 		b.WriteString("\nx: remove")

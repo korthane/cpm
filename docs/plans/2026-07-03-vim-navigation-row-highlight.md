@@ -126,12 +126,12 @@ terminal theme. Revisit if the user prefers the background variant.
 
 ### Task 4: Update documentation
 
-- [ ] update README.md keybindings: `↑/↓/j/k` rows, `←/→/h/l` columns,
+- [x] update README.md keybindings: `↑/↓/j/k` rows, `←/→/h/l` columns,
       and mention the row highlight
-- [ ] update the in-app footer help line in `View()`
+- [x] update the in-app footer help line in `View()`
       (`internal/ui/app.go`) only if it fits the current width budget —
-      the arrows are already listed; adding `j/k/h/l` is optional, skip if
-      it crowds the line
+      the arrows are already listed; adding `j/k/h/l` is optional, added
+      (the line stays shorter than the existing action-help line below it)
 
 ## Technical Details
 
