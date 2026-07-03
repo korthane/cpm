@@ -40,7 +40,7 @@ func TestPinnedMCPColumnWidthCoversHiddenRows(t *testing.T) {
 		{Name: "a-much-longer-server-name"},
 	}
 
-	col := pinnedMCPColumn(rows, 0, 1)
+	col := pinnedMCPColumn(rows, 0, 1, -1)
 
 	if len(col.cells) != 1 {
 		t.Fatalf("got %d cells, want the visible window only (1)", len(col.cells))

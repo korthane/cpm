@@ -1086,7 +1086,7 @@ func (m Model) viewPlugins() string {
 
 	table := comparisonTable{
 		profiles: make([]tableColumn, len(m.columns)),
-		pinned:   pinnedGroupColumn(groups, refs, start, end, stale, m.folded),
+		pinned:   pinnedGroupColumn(groups, refs, start, end, selRow-start, stale, m.folded),
 		sel:      m.selCol,
 		width:    m.width,
 	}
@@ -1131,7 +1131,7 @@ func (m Model) viewMCP() string {
 
 	table := comparisonTable{
 		profiles: make([]tableColumn, len(m.columns)),
-		pinned:   pinnedMCPColumn(rows, start, end),
+		pinned:   pinnedMCPColumn(rows, start, end, selRow-start),
 		sel:      m.selCol,
 		width:    m.width,
 	}
@@ -1364,10 +1364,12 @@ const (
 // chevron-prefixed marketplace headers and indented plugin names with the
 // latest available version left-aligned in a sub-column. Cells cover the
 // vertical window [start, end) but widths come from all rows so the column
-// does not jump while scrolling. stale marks the versions as possibly
-// outdated (a marketplace refresh failed, so at least one profile fell back
-// to its cached catalog).
-func pinnedGroupColumn(groups []model.PluginGroup, refs []rowRef, start, end int,
+// does not jump while scrolling. sel is the window-relative selected row
+// (-1 when none): its cell renders reversed so the selected row stays
+// findable on wide tables. stale marks the versions as possibly outdated
+// (a marketplace refresh failed, so at least one profile fell back to its
+// cached catalog).
+func pinnedGroupColumn(groups []model.PluginGroup, refs []rowRef, start, end, sel int,
 	stale bool, folded map[string]bool,
 ) tableColumn {
 	const title = "marketplace / plugin"
@@ -1392,13 +1394,16 @@ func pinnedGroupColumn(groups []model.PluginGroup, refs []rowRef, start, end int
 	}
 	for i := start; i < end; i++ {
 		ref := refs[i]
-		if ref.kind == rowMarketplace {
-			col.cells = append(col.cells, tableCell{text: texts[i], style: labelStyle})
-			continue
+		cell := tableCell{text: texts[i], style: labelStyle}
+		if ref.kind == rowPlugin {
+			latest := groups[ref.group].Plugins[ref.plugin].LatestVersion
+			text := padRight(texts[i], idW) + "  " + versionText(latest)
+			cell = tableCell{text: strings.TrimRight(text, " ")}
 		}
-		latest := groups[ref.group].Plugins[ref.plugin].LatestVersion
-		text := padRight(texts[i], idW) + "  " + versionText(latest)
-		col.cells = append(col.cells, tableCell{text: strings.TrimRight(text, " ")})
+		if i-start == sel {
+			cell.style = cell.style.Reverse(true)
+		}
+		col.cells = append(col.cells, cell)
 	}
 	return col
 }
@@ -1424,8 +1429,10 @@ func pinnedRowText(groups []model.PluginGroup, ref rowRef, folded map[string]boo
 
 // pinnedMCPColumn is the MCP identity column: the server name. Cells cover
 // the vertical window [start, end) but the header is padded to the widest of
-// all rows so the column width does not jump while scrolling.
-func pinnedMCPColumn(rows []model.MCPRow, start, end int) tableColumn {
+// all rows so the column width does not jump while scrolling. sel is the
+// window-relative selected row (-1 when none): its cell renders reversed so
+// the selected row stays findable on wide tables.
+func pinnedMCPColumn(rows []model.MCPRow, start, end, sel int) tableColumn {
 	const title = "mcp server"
 	nameW := lipgloss.Width(title)
 	for _, row := range rows {
@@ -1436,8 +1443,12 @@ func pinnedMCPColumn(rows []model.MCPRow, start, end int) tableColumn {
 		header: []tableCell{{}, {}, {text: padRight(title, nameW), style: labelStyle}},
 		cells:  make([]tableCell, 0, end-start),
 	}
-	for _, row := range rows[start:end] {
-		col.cells = append(col.cells, tableCell{text: row.Name})
+	for i, row := range rows[start:end] {
+		cell := tableCell{text: row.Name}
+		if i == sel {
+			cell.style = cell.style.Reverse(true)
+		}
+		col.cells = append(col.cells, cell)
 	}
 	return col
 }

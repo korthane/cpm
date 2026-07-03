@@ -94,18 +94,21 @@ terminal theme. Revisit if the user prefers the background variant.
 
 ### Task 2: Highlight the selected row's pinned cell
 
-- [ ] write failing UI tests: the pinned cell of the selected row renders
+- [x] write failing UI tests: the pinned cell of the selected row renders
       reversed (`\x1b[7m` present around its text in `View()`) on the
       Plugins tab for both row kinds (marketplace header and plugin row)
       and on the MCP tab; moving the selection moves the highlight; the
       highlight tracks the scroll window (selected row near the bottom of
       a tall list still highlights the correct visible line); no pinned
-      cell is reversed for rows other than the selected one
-- [ ] pass the window-relative selection index (`selRow - start`, same
+      cell is reversed for rows other than the selected one (tests force
+      the ANSI color profile — `go test` has no TTY, so the default Ascii
+      profile strips styling; the header cell renders bold+reverse as
+      `\x1b[1;7m`, matched by an SGR-aware regexp)
+- [x] pass the window-relative selection index (`selRow - start`, same
       value the profile columns get) into `pinnedGroupColumn` and
       `pinnedMCPColumn`; apply `.Reverse(true)` to the pinned cell's style
       at that index (`internal/ui/app.go`)
-- [ ] run tests — must pass before task 3
+- [x] run tests — must pass before task 3
 
 ### Task 3: Verify acceptance criteria
 
