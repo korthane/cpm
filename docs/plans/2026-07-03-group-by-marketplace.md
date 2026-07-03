@@ -179,7 +179,7 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 7: Grouped rendering with fold/unfold
 
-- [ ] write failing UI tests: `View()` shows chevron+marketplace header
+- [x] write failing UI tests: `View()` shows chevron+marketplace header
       rows with commit `hash date` cells (`—` unconfigured, `local` for
       directory sources without git info) and indented plugin names
       WITHOUT `@marketplace`; `enter`/`space` on a marketplace row folds
@@ -187,18 +187,26 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
       selection moves across marketplace and plugin rows; selection
       clamps after folding; footer second line switches between plugin
       actions and `i: add  u: update  x: remove  enter: fold` by selected
-      row kind
-- [ ] add `folded map[string]bool` and `visibleRows []rowRef`
+      row kind (`internal/ui/group_view_test.go`)
+- [x] add `folded map[string]bool` and `visibleRows []rowRef`
       (`rowRef{kind, group, plugin}`) to `Model`; rebuild on data load and
       fold toggle; `selRow` indexes `visibleRows`
-- [ ] switch `viewPlugins`/`pinnedPluginColumn`/`pluginColumn` to walk
+      (➕ deviation: `visibleRows` is derived per Update/View by
+      `visibleRefs` in `internal/ui/rows.go` instead of cached on `Model` —
+      caching would need a rebuild at every mutation point and one missed
+      call site means stale refs indexing rebuilt groups; only `folded` is
+      state)
+- [x] switch `viewPlugins`/`pinnedPluginColumn`/`pluginColumn` to walk
       `visibleRows`, emitting marketplace header cells and plugin cells
       index-aligned across pinned + profile columns (`comparisonTable`
-      unchanged, `chrome = 11` unchanged)
-- [ ] handle `enter`/`space` in `handleKey` (no-op outside marketplace
+      unchanged, `chrome = 11` unchanged) — now
+      `pinnedGroupColumn`/`groupColumn`/`marketplaceCell`
+      (➕ `model.MarketplaceCell` gained `Local bool` (directory source) so
+      the UI can render `local` without re-deriving the source kind)
+- [x] handle `enter`/`space` in `handleKey` (no-op outside marketplace
       rows and existing confirmation flow); make footer help
       selection-dependent in `View()`
-- [ ] run tests — must pass before task 8
+- [x] run tests — must pass before task 8
 
 ### Task 8: Marketplace actions (add / update / remove)
 

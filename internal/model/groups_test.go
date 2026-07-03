@@ -94,6 +94,23 @@ func TestBuildPluginGroupsMarketplaceCells(t *testing.T) {
 	}
 }
 
+func TestBuildPluginGroupsDirectorySourceMarksLocal(t *testing.T) {
+	perProfile := []claudecli.PluginData{
+		{Marketplaces: []claudecli.Marketplace{{Name: "m", Source: "directory", Path: "/opt/m"}}},
+		{Marketplaces: []claudecli.Marketplace{githubMarket("m", "owner/m")}},
+	}
+
+	groups := BuildPluginGroups(perProfile, nil)
+
+	cells := groups[0].Marketplace.Cells
+	if !cells[0].Local {
+		t.Error("directory-source cell not marked Local")
+	}
+	if cells[1].Local {
+		t.Error("github-source cell marked Local")
+	}
+}
+
 func TestBuildPluginGroupsOrphanedPlugin(t *testing.T) {
 	// A plugin whose marketplace is configured in no profile still gets a
 	// group so it renders; the marketplace row is unconfigured everywhere.

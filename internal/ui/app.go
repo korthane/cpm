@@ -97,6 +97,10 @@ type Model struct {
 	// mcpStarted flips on the first view of the MCP tab: mcp list runs a
 	// health check per server, so it only loads once actually needed.
 	mcpStarted bool
+	// folded is the per-marketplace fold state of the plugins tab (name →
+	// folded); keyed by name so it survives reloads. Not persisted across
+	// runs. Allocated lazily on the first toggle.
+	folded map[string]bool
 	// pending is a destructive action awaiting y/n confirmation.
 	pending *pendingAction
 	// status is the transient status/error line; cleared on the next key.
@@ -510,8 +514,38 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.startAction(key.String())
 		}
 		return m.startMCPAction(key.String())
+	case "enter", " ":
+		return m.toggleFold(), nil
 	}
 	return m, nil
+}
+
+// toggleFold flips the fold state of the selected marketplace group. Plugin
+// rows and the MCP tab ignore the key; during a y/n confirmation the key
+// never reaches here (handleConfirmKey resolves it first).
+func (m Model) toggleFold() Model {
+	if m.tab != tabPlugins {
+		return m
+	}
+	groups, _ := m.pluginGroups()
+	refs := visibleRefs(groups, m.folded)
+	if len(refs) == 0 {
+		return m
+	}
+	sel := min(m.selRow, len(refs)-1)
+	ref := refs[sel]
+	if ref.kind != rowMarketplace {
+		return m
+	}
+	if m.folded == nil {
+		m.folded = map[string]bool{}
+	}
+	name := groups[ref.group].Marketplace.Name
+	m.folded[name] = !m.folded[name]
+	// Only rows after the toggled header appear or disappear, so the clamped
+	// index still addresses that header.
+	m.selRow = sel
+	return m
 }
 
 // enterTab clamps the row selection to the new tab's row count and starts
@@ -561,11 +595,17 @@ var actionVerbs = map[string]string{
 // prompt first.
 func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 	verb := actionVerbs[key]
-	rows := m.pluginRows()
-	if len(rows) == 0 {
+	groups, _ := m.pluginGroups()
+	refs := visibleRefs(groups, m.folded)
+	if len(refs) == 0 {
 		return m, nil
 	}
-	row := rows[min(m.selRow, len(rows)-1)]
+	ref := refs[min(m.selRow, len(refs)-1)]
+	// Marketplace header rows carry their own action set, not the plugin one.
+	if ref.kind != rowPlugin {
+		return m, nil
+	}
+	row := groups[ref.group].Plugins[ref.plugin]
 	col := m.columns[m.selCol]
 	if col.status != statusLoaded {
 		m.setStatus(col.profile.Label+" is not loaded yet", true)
@@ -762,13 +802,27 @@ func (m Model) View() string {
 	b.WriteString("\n")
 	b.WriteString(m.statusLine())
 	b.WriteString("\n←/→ ↑/↓: select  tab: switch  r: reload  q: quit")
-	if m.tab == tabPlugins {
-		b.WriteString("\ne: enable  d: disable  u: update  x: uninstall  i: install")
-	} else {
+	switch {
+	case m.tab == tabMCP:
 		b.WriteString("\nx: remove")
+	case m.selectedMarketplaceRow():
+		b.WriteString("\ni: add  u: update  x: remove  enter: fold")
+	default:
+		b.WriteString("\ne: enable  d: disable  u: update  x: uninstall  i: install")
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// selectedMarketplaceRow reports whether the plugins-tab selection sits on a
+// marketplace header row; the second footer help line follows the row kind.
+func (m Model) selectedMarketplaceRow() bool {
+	groups, _ := m.pluginGroups()
+	refs := visibleRefs(groups, m.folded)
+	if len(refs) == 0 {
+		return false
+	}
+	return refs[min(m.selRow, len(refs)-1)].kind == rowMarketplace
 }
 
 // statusLine renders the confirmation prompt when one is pending, otherwise
@@ -799,22 +853,16 @@ func (m Model) fitWidth(s string) string {
 	return truncate(s, m.width)
 }
 
-// pluginRows builds the comparison matrix from the currently loaded columns;
-// it backs both the rendered table and action-key validation.
-func (m Model) pluginRows() []model.PluginRow {
-	rows, _ := m.pluginMatrix()
-	return rows
-}
-
-// pluginMatrix merges each column's freshly resolved latest versions into the
-// comparison rows and reports whether any of them are stale (a marketplace
-// refresh failed, so that profile fell back to its cached catalog).
-func (m Model) pluginMatrix() ([]model.PluginRow, bool) {
+// pluginGroups builds the grouped comparison data (marketplace header rows
+// plus their plugin rows) from the currently loaded columns and reports
+// whether any latest versions are stale (a marketplace refresh failed, so
+// that profile fell back to its cached catalog).
+func (m Model) pluginGroups() ([]model.PluginGroup, bool) {
 	perProfile := make([]claudecli.PluginData, len(m.columns))
 	perLatest := make([]claudecli.LatestVersions, len(m.columns))
 	for i := range m.columns {
 		// A column that failed to (re)load keeps its previous data but renders
-		// blank cells; feeding that data into the matrix would produce rows
+		// blank cells; feeding that data into the groups would produce rows
 		// with no visible owner.
 		if m.columns[i].status != statusLoaded {
 			continue
@@ -823,17 +871,18 @@ func (m Model) pluginMatrix() ([]model.PluginRow, bool) {
 		perLatest[i] = m.columns[i].latest
 	}
 	latest, stale := model.MergeLatestVersions(perLatest)
-	return model.BuildPluginMatrix(perProfile, latest), stale
+	return model.BuildPluginGroups(perProfile, latest), stale
 }
 
 func (m Model) viewPlugins() string {
-	rows, stale := m.pluginMatrix()
-	selRow := max(0, min(m.selRow, len(rows)-1))
-	start, end := m.rowWindow(len(rows))
+	groups, stale := m.pluginGroups()
+	refs := visibleRefs(groups, m.folded)
+	selRow := max(0, min(m.selRow, len(refs)-1))
+	start, end := m.rowWindow(len(refs))
 
 	table := comparisonTable{
 		profiles: make([]tableColumn, len(m.columns)),
-		pinned:   pinnedPluginColumn(rows, start, end, stale),
+		pinned:   pinnedGroupColumn(groups, refs, start, end, stale, m.folded),
 		sel:      m.selCol,
 		width:    m.width,
 	}
@@ -842,9 +891,9 @@ func (m Model) viewPlugins() string {
 		if i == m.selCol {
 			rowSel = selRow - start
 		}
-		table.profiles[i] = m.columns[i].pluginColumn(i, rows[start:end], rowSel, m.spinner.View())
+		table.profiles[i] = m.columns[i].groupColumn(i, groups, refs[start:end], rowSel, m.spinner.View())
 	}
-	return table.render() + m.overflowLine(start, end, len(rows))
+	return table.render() + m.overflowLine(start, end, len(refs))
 }
 
 // mcpRows builds the MCP comparison matrix from the currently loaded columns.
@@ -861,13 +910,14 @@ func (m Model) mcpRows() []model.MCPRow {
 	return model.BuildMCPMatrix(perProfile)
 }
 
-// rowCount is the active tab's number of matrix rows; it bounds the row
+// rowCount is the active tab's number of visible rows; it bounds the row
 // selection.
 func (m Model) rowCount() int {
 	if m.tab == tabMCP {
 		return len(m.mcpRows())
 	}
-	return len(m.pluginRows())
+	groups, _ := m.pluginGroups()
+	return len(visibleRefs(groups, m.folded))
 }
 
 func (m Model) viewMCP() string {
@@ -919,11 +969,14 @@ func (m Model) overflowLine(start, end, total int) string {
 	return statusStyle.Render(fmt.Sprintf("… rows %d–%d of %d", start+1, end, total)) + "\n"
 }
 
-// pluginColumn is this profile's table column: a three-line header
-// (label, path, account or load status) plus one cell per matrix row.
+// groupColumn is this profile's table column: a three-line header
+// (label, path, account or load status) plus one cell per visible row —
+// commit info for marketplace headers, plugin state for plugin rows.
 // selRow marks the selected cell (-1 when the selection is elsewhere);
 // spin is the shared spinner frame for loading cells.
-func (c *column) pluginColumn(idx int, rows []model.PluginRow, selRow int, spin string) tableColumn {
+func (c *column) groupColumn(idx int, groups []model.PluginGroup, refs []rowRef,
+	selRow int, spin string,
+) tableColumn {
 	labelCell := tableCell{text: c.profile.Label, style: labelStyle}
 	if selRow >= 0 {
 		labelCell.style = labelStyle.Underline(true)
@@ -934,16 +987,42 @@ func (c *column) pluginColumn(idx int, rows []model.PluginRow, selRow int, spin 
 			{text: c.profile.Path, style: pathStyle},
 			c.statusCell(spin),
 		},
-		cells: make([]tableCell, len(rows)),
+		cells: make([]tableCell, len(refs)),
 	}
-	for i, row := range rows {
-		cell := c.bodyCell(row.Cells[idx])
+	for i, ref := range refs {
+		var cell tableCell
+		if ref.kind == rowMarketplace {
+			cell = c.marketplaceCell(groups[ref.group].Marketplace.Cells[idx])
+		} else {
+			cell = c.bodyCell(groups[ref.group].Plugins[ref.plugin].Cells[idx])
+		}
 		if i == selRow {
 			cell.style = cell.style.Reverse(true)
 		}
 		col.cells[i] = cell
 	}
 	return col
+}
+
+// marketplaceCell renders one marketplace-header cell: the clone's commit
+// `hash date` when known, `local` for a directory source without git info,
+// `—` when the marketplace is not configured in this profile. Blank while
+// the column's data has not arrived, or when a non-directory source's git
+// lookup failed (blank means "unknown", which `local` would misstate).
+func (c *column) marketplaceCell(cell model.MarketplaceCell) tableCell {
+	if c.status != statusLoaded {
+		return tableCell{}
+	}
+	switch {
+	case !cell.Configured:
+		return tableCell{text: "—", style: absentStyle}
+	case cell.CommitHash != "":
+		return tableCell{text: strings.TrimSpace(cell.CommitHash + " " + cell.CommitDate)}
+	case cell.Local:
+		return tableCell{text: "local", style: pathStyle}
+	default:
+		return tableCell{}
+	}
 }
 
 // mcpColumn is this profile's MCP-tab column: the same three-line header as
@@ -1068,17 +1147,29 @@ func formatPluginCell(c model.PluginCell) string {
 	return text
 }
 
-// pinnedPluginColumn is the identity column: `name@marketplace` plus the
-// latest available version, with the versions left-aligned in a sub-column.
-// Cells cover the vertical window [start, end) but the sub-column width comes
-// from all rows so it does not jump while scrolling. stale marks the versions
-// as possibly outdated (a marketplace refresh failed, so at least one profile
-// fell back to its cached catalog).
-func pinnedPluginColumn(rows []model.PluginRow, start, end int, stale bool) tableColumn {
-	const title = "plugin@marketplace"
+// NerdFont chevrons marking a marketplace group's fold state; terminals
+// without a NerdFont show tofu — accepted trade-off per the design.
+const (
+	chevronUnfolded = "" // fa-angle-down
+	chevronFolded   = "" // fa-angle-right
+)
+
+// pinnedGroupColumn is the identity column of the grouped plugins view:
+// chevron-prefixed marketplace headers and indented plugin names with the
+// latest available version left-aligned in a sub-column. Cells cover the
+// vertical window [start, end) but widths come from all rows so the column
+// does not jump while scrolling. stale marks the versions as possibly
+// outdated (a marketplace refresh failed, so at least one profile fell back
+// to its cached catalog).
+func pinnedGroupColumn(groups []model.PluginGroup, refs []rowRef, start, end int,
+	stale bool, folded map[string]bool,
+) tableColumn {
+	const title = "marketplace / plugin"
+	texts := make([]string, len(refs))
 	idW := lipgloss.Width(title)
-	for _, row := range rows {
-		idW = max(idW, lipgloss.Width(row.ID.String()))
+	for i, ref := range refs {
+		texts[i] = pinnedRowText(groups, ref, folded)
+		idW = max(idW, lipgloss.Width(texts[i]))
 	}
 
 	latestTitle := "latest"
@@ -1093,11 +1184,36 @@ func pinnedPluginColumn(rows []model.PluginRow, start, end int, stale bool) tabl
 		}},
 		cells: make([]tableCell, 0, end-start),
 	}
-	for _, row := range rows[start:end] {
-		text := padRight(row.ID.String(), idW) + "  " + versionText(row.LatestVersion)
+	for i := start; i < end; i++ {
+		ref := refs[i]
+		if ref.kind == rowMarketplace {
+			col.cells = append(col.cells, tableCell{text: texts[i], style: labelStyle})
+			continue
+		}
+		latest := groups[ref.group].Plugins[ref.plugin].LatestVersion
+		text := padRight(texts[i], idW) + "  " + versionText(latest)
 		col.cells = append(col.cells, tableCell{text: strings.TrimRight(text, " ")})
 	}
 	return col
+}
+
+// pinnedRowText renders one identity cell: a chevron-prefixed marketplace
+// header (with the hidden plugin count while folded) or an indented plugin
+// name — the group header carries the marketplace, so plugin names drop the
+// `@marketplace` suffix.
+func pinnedRowText(groups []model.PluginGroup, ref rowRef, folded map[string]bool) string {
+	if ref.kind == rowPlugin {
+		return "  " + groups[ref.group].Plugins[ref.plugin].ID.Name
+	}
+	g := groups[ref.group]
+	if !folded[g.Marketplace.Name] {
+		return chevronUnfolded + " " + g.Marketplace.Name
+	}
+	noun := "plugins"
+	if len(g.Plugins) == 1 {
+		noun = "plugin"
+	}
+	return fmt.Sprintf("%s %s (%d %s)", chevronFolded, g.Marketplace.Name, len(g.Plugins), noun)
 }
 
 // pinnedMCPColumn is the MCP identity column: the server name. Cells cover

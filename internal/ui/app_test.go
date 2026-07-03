@@ -356,9 +356,9 @@ func TestFailedReloadColumnProducesNoPhantomRows(t *testing.T) {
 	updated, _ := m.Update(profileErrMsg{index: 1, err: errors.New("reload failed")})
 	m = updated.(Model)
 
-	rows := m.pluginRows()
-	if len(rows) != 1 || rows[0].ID.Name != "foo" {
-		t.Fatalf("rows after failed reload = %+v, want only foo", rows)
+	groups, _ := m.pluginGroups()
+	if len(groups) != 1 || len(groups[0].Plugins) != 1 || groups[0].Plugins[0].ID.Name != "foo" {
+		t.Fatalf("groups after failed reload = %+v, want only foo under mp", groups)
 	}
 }
 

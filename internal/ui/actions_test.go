@@ -61,6 +61,10 @@ func press(t *testing.T, m Model, key string) (Model, tea.Cmd) {
 		msg = tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "ctrl+c":
 		msg = tea.KeyMsg{Type: tea.KeyCtrlC}
+	case "enter":
+		msg = tea.KeyMsg{Type: tea.KeyEnter}
+	case "space":
+		msg = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
 	}
 	updated, cmd := m.Update(msg)
 	return updated.(Model), cmd
@@ -101,6 +105,8 @@ func TestActionKeysInvokeCorrectCLI(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			runner := &claudecli.FakeRunner{}
 			m := modelWithCells(t, runner, tt.data...)
+			// Row 0 is the mp group header; foo's plugin row sits under it.
+			m, _ = press(t, m, "down")
 			for range tt.col {
 				m, _ = press(t, m, "right")
 			}
@@ -137,6 +143,7 @@ func TestActionKeysInvokeCorrectCLI(t *testing.T) {
 func TestUninstallBlockedUntilConfirmed(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, installedFoo(true))
+	m, _ = press(t, m, "down") // move off the mp group header onto foo's row
 
 	m, cmd := press(t, m, "x")
 	if cmd != nil {
@@ -180,6 +187,7 @@ func TestActionFailureSurfacesErrorAndKeepsState(t *testing.T) {
 		},
 	}
 	m := modelWithCells(t, runner, installedFoo(true))
+	m, _ = press(t, m, "down")
 
 	m, cmd := press(t, m, "u")
 	if cmd == nil {
@@ -304,6 +312,7 @@ func TestEveryUIFiredCommandCarriesTimeout(t *testing.T) {
 func TestActionSuccessRefreshesProfile(t *testing.T) {
 	runner := &claudecli.FakeRunner{Responses: map[string]claudecli.FakeResponse{}}
 	m := modelWithCells(t, runner, installedFoo(true), installedFoo(true))
+	m, _ = press(t, m, "down")
 
 	m, cmd := press(t, m, "d")
 	// The CLI now reports the plugin disabled; the post-action refresh must
@@ -350,6 +359,7 @@ func TestActionRefreshSkipsMarketplaceUpdateAndKeepsStaleFlag(t *testing.T) {
 	loaded, _ := m.Update(profileLoadedMsg{index: 0, plugins: installedFoo(true),
 		latest: claudecli.LatestVersions{Stale: true}})
 	m = loaded.(Model)
+	m, _ = press(t, m, "down")
 
 	m, cmd := press(t, m, "d")
 	runner.Responses["plugin list --available --json"] = claudecli.FakeResponse{
@@ -379,6 +389,7 @@ func TestActionRefreshSkipsMarketplaceUpdateAndKeepsStaleFlag(t *testing.T) {
 func TestSecondActionBlockedWhileActionInFlight(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, installedFoo(true))
+	m, _ = press(t, m, "down")
 
 	m, cmd := press(t, m, "u")
 	if cmd == nil {
@@ -405,6 +416,7 @@ func TestSecondActionBlockedWhileActionInFlight(t *testing.T) {
 func TestReloadSkipsBusyColumn(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, installedFoo(true), installedFoo(true))
+	m, _ = press(t, m, "down")
 
 	// Start an update on p0; its command is not executed, so the action is
 	// still in flight when reload is pressed.
@@ -461,7 +473,8 @@ func TestActionRefreshReloadsStartedMCPTab(t *testing.T) {
 	loaded, _ := m.Update(mcpLoadedMsg{index: 0, gen: m.columns[0].mcpGen,
 		servers: []claudecli.MCPServer{{Name: "plugin:foo:srv", Target: "stdio"}}})
 	m = loaded.(Model)
-	m, _ = press(t, m, "tab") // back to plugins
+	m, _ = press(t, m, "tab")  // back to plugins
+	m, _ = press(t, m, "down") // off the mp group header onto foo's row
 
 	m, cmd := press(t, m, "u")
 	updated, refresh := m.Update(cmd())
@@ -539,19 +552,22 @@ func TestUpClampsAfterRowSetShrinks(t *testing.T) {
 
 	// A reload delivers a shrunken row set under the out-of-range selection;
 	// `up` must clamp before moving, not walk back one dead press at a time.
+	// The visible rows are now [mp header, plug0, plug1]: clamp lands on the
+	// last row (2), the move on plug0 (1).
 	m, _ = press(t, m, "r")
 	updated, _ := m.Update(profileLoadedMsg{index: 0, gen: m.columns[0].gen,
 		plugins: claudecli.PluginData{Installed: installed[:2]}})
 	m = updated.(Model)
 
-	if m, _ = press(t, m, "up"); m.selRow != 0 {
-		t.Errorf("selRow after up on a shrunken row set = %d, want 0 (clamped, then moved)", m.selRow)
+	if m, _ = press(t, m, "up"); m.selRow != 1 {
+		t.Errorf("selRow after up on a shrunken row set = %d, want 1 (clamped, then moved)", m.selRow)
 	}
 }
 
 func TestActionOnWrongCellStateShowsHint(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, installedFoo(true))
+	m, _ = press(t, m, "down")
 
 	// Enable is only valid on a disabled plugin.
 	m, cmd := press(t, m, "e")
@@ -571,6 +587,7 @@ func TestActionOnLoadingColumnShowsHint(t *testing.T) {
 	m := modelWithCells(t, runner, installedFoo(true))
 	// Add a second, still-loading profile and select it.
 	m.columns = append(m.columns, column{profile: config.Profile{Path: "/h/p1", Label: "p1"}})
+	m, _ = press(t, m, "down")
 	m, _ = press(t, m, "right")
 
 	m, cmd := press(t, m, "u")
@@ -586,6 +603,7 @@ func TestInstallBlockedWhenMarketplaceMissingInTarget(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	// p1 has no catalog entry for foo@mp: its marketplace is not configured.
 	m := modelWithCells(t, runner, installedFoo(true), claudecli.PluginData{})
+	m, _ = press(t, m, "down")
 	m, _ = press(t, m, "right")
 
 	m, cmd := press(t, m, "i")
@@ -607,6 +625,7 @@ func TestActionOnNonUserScopeShowsHint(t *testing.T) {
 	}
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, data)
+	m, _ = press(t, m, "down")
 
 	m, cmd := press(t, m, "u")
 	if cmd != nil || len(runner.Calls) != 0 {
@@ -624,6 +643,7 @@ func TestPluginActionRefusesFlagLikeName(t *testing.T) {
 	}
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, data)
+	m, _ = press(t, m, "down")
 
 	m, cmd := press(t, m, "u")
 	if cmd != nil || len(runner.Calls) != 0 {
@@ -651,6 +671,7 @@ func TestActionKeysOnEmptyMatrixDoNothing(t *testing.T) {
 func TestCtrlCQuitsDuringConfirmation(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := modelWithCells(t, runner, installedFoo(true))
+	m, _ = press(t, m, "down")
 
 	m, _ = press(t, m, "x") // arm the uninstall confirmation
 	_, cmd := press(t, m, "ctrl+c")
@@ -744,11 +765,12 @@ func TestRowSelectionMovesAndClamps(t *testing.T) {
 	for range 3 {
 		m, _ = press(t, m, "down")
 	}
-	if m.selRow != 1 {
-		t.Errorf("selRow after 3 downs over 2 rows = %d, want 1 (clamped)", m.selRow)
+	if m.selRow != 2 {
+		t.Errorf("selRow after 3 downs over 3 rows = %d, want 2 (clamped)", m.selRow)
 	}
 
-	// The action targets the selected row: rows sort bar@mp, foo@mp.
+	// The action targets the selected row: visible rows are the mp header,
+	// then bar and foo sorted by name.
 	_, cmd := press(t, m, "d")
 	if cmd == nil {
 		t.Fatal("disable on selected row produced no command")

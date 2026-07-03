@@ -85,11 +85,11 @@ func TestPinnedColumnVisibleAtAllScrollOffsets(t *testing.T) {
 
 	for offset := range 4 {
 		view := scrollRight(t, m, offset).View()
-		if !strings.Contains(view, "plugin@marketplace") {
+		if !strings.Contains(view, "marketplace / plugin") {
 			t.Errorf("offset %d: pinned header missing:\n%s", offset, view)
 		}
-		if !strings.Contains(view, "foo@mp") {
-			t.Errorf("offset %d: pinned identity cell missing:\n%s", offset, view)
+		if !strings.Contains(view, chevronUnfolded+" mp") || !strings.Contains(view, "  foo") {
+			t.Errorf("offset %d: pinned identity cells missing:\n%s", offset, view)
 		}
 		if !strings.Contains(view, "latest") {
 			t.Errorf("offset %d: pinned 'latest' header missing:\n%s", offset, view)
@@ -241,6 +241,7 @@ func TestVerticalScrollKeepsSelectedRowVisible(t *testing.T) {
 	resized, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 16})
 	m = resized.(Model)
 
+	// 21 visible rows: the mp group header plus 20 plugins.
 	view := m.View()
 	if !strings.Contains(view, "plug00") {
 		t.Errorf("top window missing first row:\n%s", view)
@@ -248,11 +249,11 @@ func TestVerticalScrollKeepsSelectedRowVisible(t *testing.T) {
 	if strings.Contains(view, "plug10") {
 		t.Errorf("row beyond the window rendered:\n%s", view)
 	}
-	if !strings.Contains(view, "… rows 1–5 of 20") {
+	if !strings.Contains(view, "… rows 1–5 of 21") {
 		t.Errorf("overflow marker missing:\n%s", view)
 	}
 
-	for range 10 {
+	for range 11 {
 		m, _ = press(t, m, "down")
 	}
 	view = m.View()
@@ -262,7 +263,7 @@ func TestVerticalScrollKeepsSelectedRowVisible(t *testing.T) {
 	if strings.Contains(view, "plug00") {
 		t.Errorf("row scrolled out still rendered:\n%s", view)
 	}
-	if !strings.Contains(view, "… rows 7–11 of 20") {
+	if !strings.Contains(view, "… rows 8–12 of 21") {
 		t.Errorf("overflow marker not updated:\n%s", view)
 	}
 }

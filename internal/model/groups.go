@@ -14,6 +14,10 @@ type MarketplaceCell struct {
 	Configured bool
 	CommitHash string
 	CommitDate string // YYYY-MM-DD
+	// Local marks a directory-source marketplace, whose clone often has no
+	// git info to show; the UI renders `local` there instead of a blank
+	// freshness cell.
+	Local bool
 }
 
 // MarketplaceRow is a group header: one marketplace with one cell per
@@ -62,6 +66,7 @@ func BuildPluginGroups(perProfile []claudecli.PluginData, latest map[claudecli.P
 				Configured: true,
 				CommitHash: mkt.CommitHash,
 				CommitDate: mkt.CommitDate,
+				Local:      mkt.Source == "directory",
 			}
 			// An unusable source (empty arg) never conflicts with a known
 			// one: it means "don't know", not "different".
