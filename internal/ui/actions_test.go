@@ -301,6 +301,7 @@ func TestEveryUIFiredCommandCarriesTimeout(t *testing.T) {
 	runPluginAction(r, 0, "/h/p0", fooID, "update")()
 	runMCPRemove(r, 0, "/h/p0", "exa")()
 	runMarketplaceAction(r, 0, "/h/p0", "update", "mp", "")()
+	runMarketplaceAddFor(r, 0, "/h/p0", "mp", "owner/mp", fooID)()
 
 	if r.calls == 0 {
 		t.Fatal("no CLI calls recorded")
@@ -600,19 +601,232 @@ func TestActionOnLoadingColumnShowsHint(t *testing.T) {
 	}
 }
 
-func TestInstallBlockedWhenMarketplaceMissingInTarget(t *testing.T) {
+func TestInstallAddsMissingMarketplaceThenInstalls(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
-	// p1 has no catalog entry for foo@mp: its marketplace is not configured.
-	m := modelWithCells(t, runner, installedFoo(true), claudecli.PluginData{})
+	// p0 knows mp's source; p1 lacks the marketplace entirely.
+	p0 := withMarketplace(installedFoo(true), "mp", "a1b2c3", "2026-06-28")
+	m := modelWithCells(t, runner, p0, claudecli.PluginData{})
+	m, _ = press(t, m, "down")  // off the mp group header onto foo's row
+	m, _ = press(t, m, "right") // p1
+
+	m, cmd := press(t, m, "i")
+	if cmd == nil {
+		t.Fatal("install with a known marketplace source produced no command")
+	}
+	if !m.columns[1].busy {
+		t.Error("column not busy during the implicit add")
+	}
+	if view := m.View(); !strings.Contains(view, "adding marketplace mp in p1") {
+		t.Errorf("add-step status missing:\n%s", view)
+	}
+
+	// The add's result message chains the install command.
+	updated, installCmd := m.Update(cmd())
+	m = updated.(Model)
+	if installCmd == nil {
+		t.Fatal("successful add chained no install command")
+	}
+	if !m.columns[1].busy {
+		t.Error("column released busy between add and install")
+	}
+	if view := m.View(); !strings.Contains(view, "install foo@mp in p1") {
+		t.Errorf("install-step status missing:\n%s", view)
+	}
+
+	done, ok := installCmd().(actionDoneMsg)
+	if !ok {
+		t.Fatalf("install step produced %T, want actionDoneMsg", installCmd())
+	}
+	if done.err != nil {
+		t.Fatalf("install step failed: %v", done.err)
+	}
+
+	// Exactly one add then one install, both against p1's config dir.
+	wantAdd := []string{"plugin", "marketplace", "add", "owner/mp", "--scope", "user"}
+	wantInstall := []string{"plugin", "install", "--scope", "user", "foo@mp"}
+	addIdx, installIdx := -1, -1
+	for i, c := range runner.Calls {
+		switch {
+		case slices.Equal(c.Args, wantAdd):
+			addIdx = i
+		case slices.Equal(c.Args, wantInstall):
+			installIdx = i
+		default:
+			continue
+		}
+		if c.ProfileDir != "/h/p1" {
+			t.Errorf("call %v ran against %q, want /h/p1", c.Args, c.ProfileDir)
+		}
+	}
+	if addIdx == -1 || installIdx == -1 || addIdx > installIdx {
+		t.Fatalf("want add before install, got add=%d install=%d (all calls: %v)",
+			addIdx, installIdx, runner.Calls)
+	}
+
+	// Completion clears busy and refreshes the column as usual.
+	updated, refresh := m.Update(done)
+	m = updated.(Model)
+	if m.columns[1].busy {
+		t.Error("column still busy after the install completed")
+	}
+	if refresh == nil {
+		t.Error("completed install triggered no refresh")
+	}
+}
+
+func TestInstallSkippedWhenImplicitAddFails(t *testing.T) {
+	runner := &claudecli.FakeRunner{Responses: map[string]claudecli.FakeResponse{
+		"plugin marketplace add owner/mp --scope user": {Err: errors.New("boom")},
+	}}
+	p0 := withMarketplace(installedFoo(true), "mp", "a1b2c3", "2026-06-28")
+	m := modelWithCells(t, runner, p0, claudecli.PluginData{})
+	m, _ = press(t, m, "down")
+	m, _ = press(t, m, "right")
+
+	m, cmd := press(t, m, "i")
+	if cmd == nil {
+		t.Fatal("expected the add command")
+	}
+	updated, next := m.Update(cmd())
+	m = updated.(Model)
+
+	if next != nil {
+		t.Error("failed add still chained a command")
+	}
+	if len(pluginCalls(runner, "install")) != 0 {
+		t.Error("install ran after the add failed")
+	}
+	if m.columns[1].busy {
+		t.Error("column still busy after the failed add")
+	}
+	if m.columns[1].status != statusLoaded {
+		t.Errorf("column status = %v, want loaded (clean failure, no reload)", m.columns[1].status)
+	}
+	if view := m.View(); !strings.Contains(view, "boom") {
+		t.Errorf("add failure missing from status:\n%s", view)
+	}
+}
+
+func TestInstallFailureAfterAddStillReloads(t *testing.T) {
+	// The add already mutated the profile's config; even a cleanly failed
+	// install must reload the column so the new marketplace shows up.
+	runner := &claudecli.FakeRunner{Responses: map[string]claudecli.FakeResponse{
+		"plugin install --scope user foo@mp": {Err: errors.New("boom")},
+	}}
+	p0 := withMarketplace(installedFoo(true), "mp", "a1b2c3", "2026-06-28")
+	m := modelWithCells(t, runner, p0, claudecli.PluginData{})
+	m, _ = press(t, m, "down")
+	m, _ = press(t, m, "right")
+
+	m, cmd := press(t, m, "i")
+	if cmd == nil {
+		t.Fatal("expected the add command")
+	}
+	updated, installCmd := m.Update(cmd())
+	m = updated.(Model)
+	if installCmd == nil {
+		t.Fatal("successful add chained no install command")
+	}
+	updated, refresh := m.Update(installCmd())
+	m = updated.(Model)
+
+	if refresh == nil {
+		t.Error("failed install after a successful add triggered no reload")
+	}
+	if m.columns[1].status != statusLoading {
+		t.Errorf("column status = %v, want loading (reload after the add applied)", m.columns[1].status)
+	}
+	if m.columns[1].busy {
+		t.Error("column still busy after the failed install")
+	}
+	if view := m.View(); !strings.Contains(view, "boom") {
+		t.Errorf("install failure missing from status:\n%s", view)
+	}
+}
+
+func TestInstallWithoutUsableSourceKeepsRefusal(t *testing.T) {
+	// A github marketplace whose repo differs per profile (source conflict).
+	conflicted := func(repo string) claudecli.PluginData {
+		return claudecli.PluginData{Marketplaces: []claudecli.Marketplace{
+			{Name: "mp", Source: "github", Repo: repo},
+		}}
+	}
+	tests := []struct {
+		name string
+		data []claudecli.PluginData
+		col  int
+	}{
+		// An orphaned marketplace (referenced only by p0's installed plugin,
+		// configured nowhere) has no known source to add from.
+		{"no known source", []claudecli.PluginData{installedFoo(true), {}}, 1},
+		{"source conflict", []claudecli.PluginData{
+			withMarketplace(installedFoo(true), "mp", "", ""), conflicted("other/mp"), {},
+		}, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &claudecli.FakeRunner{}
+			m := modelWithCells(t, runner, tt.data...)
+			m, _ = press(t, m, "down")
+			for range tt.col {
+				m, _ = press(t, m, "right")
+			}
+
+			m, cmd := press(t, m, "i")
+			if cmd != nil || len(runner.Calls) != 0 {
+				t.Fatal("install without a usable source reached the CLI")
+			}
+			if view := m.View(); !strings.Contains(view, `marketplace "mp" is not configured`) {
+				t.Errorf("missing-marketplace hint missing:\n%s", view)
+			}
+		})
+	}
+}
+
+func TestInstallRefusesFlagLikeSourceArg(t *testing.T) {
+	data := claudecli.PluginData{
+		Installed:    []claudecli.InstalledPlugin{{ID: fooID, Version: "1.0.0", Enabled: true}},
+		Marketplaces: []claudecli.Marketplace{{Name: "mp", Source: "github", Repo: "--evil"}},
+	}
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, data, claudecli.PluginData{})
 	m, _ = press(t, m, "down")
 	m, _ = press(t, m, "right")
 
 	m, cmd := press(t, m, "i")
 	if cmd != nil || len(runner.Calls) != 0 {
-		t.Fatal("install without the marketplace reached the CLI")
+		t.Fatal("flag-like marketplace source reached the CLI")
 	}
-	if view := m.View(); !strings.Contains(view, `marketplace "mp" is not configured`) {
-		t.Errorf("missing-marketplace hint missing:\n%s", view)
+	if view := m.View(); !strings.Contains(view, "looks like a CLI flag") {
+		t.Errorf("refusal hint missing:\n%s", view)
+	}
+}
+
+func TestImplicitAddTimeoutIsUncertainAndReloads(t *testing.T) {
+	// Same contract as other actions: a timed-out add was killed mid-flight,
+	// so the write may have applied and the column must reload. The install
+	// is never attempted.
+	old := cmdTimeout
+	cmdTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { cmdTimeout = old })
+
+	msg, ok := runMarketplaceAddFor(ctxWaitRunner{}, 0, "/h/p0", "mp", "owner/mp", fooID)().(marketplaceAddedMsg)
+	if !ok || msg.err == nil || !msg.uncertain {
+		t.Fatalf("timed-out implicit add = %+v, want err and uncertain", msg)
+	}
+
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, installedFoo(true))
+	updated, refresh := m.Update(msg)
+	got := updated.(Model)
+	if refresh == nil {
+		t.Error("timed-out implicit add triggered no reload")
+	}
+	if got.columns[0].status != statusLoading {
+		t.Errorf("column status = %v, want loading after an uncertain add", got.columns[0].status)
+	}
+	if len(pluginCalls(runner, "install")) != 0 {
+		t.Error("install ran after the timed-out add")
 	}
 }
 

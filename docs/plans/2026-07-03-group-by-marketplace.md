@@ -233,7 +233,7 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 9: Implicit marketplace add before plugin install
 
-- [ ] write failing UI tests: installing a plugin into a profile lacking
+- [x] write failing UI tests: installing a plugin into a profile lacking
       its marketplace but with a usable `SourceArg` fires ONE async action
       running `plugin marketplace add <sourceArg> --scope user` then
       `plugin install --scope user <id>` sequentially (assert
@@ -241,13 +241,23 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
       attempted, error in status; no usable source (`SourceArg` empty or
       `SourceConflict`) → old refusal message; timeout → uncertain +
       forced reload
-- [ ] replace the `hasAvailable` refusal branch in `startAction`
+      (➕ also: flag-like `SourceArg` refused; add succeeded + install
+      failed cleanly → column still reloads, since the add already wrote)
+- [x] replace the `hasAvailable` refusal branch in `startAction`
       (`internal/ui/app.go:579`) with the add-then-install command;
       status line updates between steps
       (`adding marketplace X…` → `installing…`)
-- [ ] replace `TestInstallBlockedWhenMarketplaceMissingInTarget`
+      (➕ deviation: implemented as two chained tea.Cmds, not one — the add
+      reports via a new `marketplaceAddedMsg` whose handler sets the
+      `install …` status and fires the install command; a single command
+      could not update the status between steps. Busy is held across both
+      steps, so the busy-gating is unchanged. The chained install's
+      `actionDoneMsg` carries a new `mutated` flag forcing the column
+      reload even on a clean install failure, because the add already
+      mutated the profile's config)
+- [x] replace `TestInstallBlockedWhenMarketplaceMissingInTarget`
       (`internal/ui/actions_test.go:585`) with the new-contract tests
-- [ ] run tests — must pass before task 10
+- [x] run tests — must pass before task 10
 
 ### Task 10: Verify acceptance criteria
 

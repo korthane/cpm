@@ -177,6 +177,22 @@ type actionDoneMsg struct {
 	target    string
 	err       error
 	uncertain bool
+	// mutated marks a failed action that still changed the profile's config —
+	// the implicit marketplace add applied before the chained install failed —
+	// so the column must reload despite the clean failure.
+	mutated bool
+}
+
+// marketplaceAddedMsg reports the implicit `plugin marketplace add` that
+// precedes installing a plugin into a profile lacking its marketplace; on
+// success the handler chains the install command, so the status line can
+// update between the two steps.
+type marketplaceAddedMsg struct {
+	index     int
+	name      string
+	plugin    claudecli.PluginID
+	err       error
+	uncertain bool
 }
 
 // mcpActionDoneMsg reports a finished MCP remove against one profile; see
@@ -389,8 +405,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.verb, msg.target, col.profile.Label, msg.err), true)
 			// A CLI-reported failure changed nothing, so the column's data
 			// stays valid. A timed-out action may have (partially) applied
-			// before the kill, so the column must be reloaded.
-			if !msg.uncertain {
+			// before the kill, and a chained action may have written in an
+			// earlier step (mutated); those must reload the column.
+			if !msg.uncertain && !msg.mutated {
 				return m, nil
 			}
 		} else {
@@ -415,6 +432,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, loadMCPProfile(m.runner, msg.index, col.mcpGen, col.profile.Path))
 		}
 		return m, tea.Batch(cmds...)
+
+	case marketplaceAddedMsg:
+		// A failed add means the install is never attempted; route the failure
+		// through the shared actionDoneMsg path so busy-clearing and the
+		// uncertain→reload semantics stay in one place.
+		if msg.err != nil {
+			return m.Update(actionDoneMsg{index: msg.index, verb: "add marketplace", target: msg.name,
+				err: msg.err, uncertain: msg.uncertain})
+		}
+		col := m.columns[msg.index]
+		m.setStatus(fmt.Sprintf("install %s in %s…", msg.plugin, col.profile.Label), false)
+		install := runPluginAction(m.runner, msg.index, col.profile.Path, msg.plugin, "install")
+		// The add already wrote to the profile's config, so the install's
+		// result must reload the column even when the install itself fails
+		// cleanly — otherwise the new marketplace stays invisible.
+		return m, func() tea.Msg {
+			done := install().(actionDoneMsg)
+			done.mutated = true
+			return done
+		}
 
 	case mcpActionDoneMsg:
 		col := &m.columns[msg.index]
@@ -640,11 +677,10 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	// Installing needs the plugin's marketplace configured in the target
-	// profile; without it the CLI would fail with a raw lookup error.
+	// profile; when it is missing and another profile knows a usable source,
+	// add the marketplace implicitly instead of refusing.
 	if verb == "install" && !hasAvailable(col.plugins, row.ID) {
-		m.setStatus(fmt.Sprintf("cannot install %s in %s: marketplace %q is not configured there"+
-			" (claude plugin marketplace add)", row.ID, col.profile.Label, row.ID.Marketplace), true)
-		return m, nil
+		return m.startInstallWithAdd(row.ID, groups[ref.group].Marketplace)
 	}
 	if verb == "uninstall" {
 		m.pending = &pendingAction{verb: verb, target: row.ID.String(), col: m.selCol}
@@ -653,6 +689,44 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 	m.setStatus(fmt.Sprintf("%s %s in %s…", verb, row.ID, col.profile.Label), false)
 	m.columns[m.selCol].busy = true
 	return m, runPluginAction(m.runner, m.selCol, col.profile.Path, row.ID, verb)
+}
+
+// startInstallWithAdd handles install into a profile whose catalogs lack the
+// plugin's marketplace: with a usable source the add fires first and the
+// install is chained onto its success message (marketplaceAddedMsg); without
+// one the install is refused as it was before implicit adds existed.
+func (m Model) startInstallWithAdd(id claudecli.PluginID, mkt model.MarketplaceRow) (tea.Model, tea.Cmd) {
+	col := m.columns[m.selCol]
+	if mkt.SourceConflict || mkt.SourceArg == "" {
+		m.setStatus(fmt.Sprintf("cannot install %s in %s: marketplace %q is not configured there"+
+			" (claude plugin marketplace add)", id, col.profile.Label, mkt.Name), true)
+		return m, nil
+	}
+	// The source is third-party data passed as a positional arg; refuse
+	// anything the claude CLI would parse as a flag.
+	if strings.HasPrefix(mkt.SourceArg, "-") {
+		m.setStatus(fmt.Sprintf("refusing install: marketplace %s source looks like a CLI flag",
+			mkt.Name), true)
+		return m, nil
+	}
+	m.setStatus(fmt.Sprintf("adding marketplace %s in %s…", mkt.Name, col.profile.Label), false)
+	m.columns[m.selCol].busy = true
+	return m, runMarketplaceAddFor(m.runner, m.selCol, col.profile.Path, mkt.Name, mkt.SourceArg, id)
+}
+
+// runMarketplaceAddFor fires the implicit `plugin marketplace add` preceding
+// a plugin install; unlike runMarketplaceAction it reports through
+// marketplaceAddedMsg so the handler can chain the install.
+func runMarketplaceAddFor(r claudecli.Runner, index int, profileDir, name, sourceArg string,
+	plugin claudecli.PluginID,
+) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		_, err := r.Run(ctx, profileDir, "plugin", "marketplace", "add", sourceArg, "--scope", "user")
+		return marketplaceAddedMsg{index: index, name: name, plugin: plugin, err: err,
+			uncertain: err != nil && ctx.Err() != nil}
+	}
 }
 
 // marketplaceVerbs maps an action key to its `plugin marketplace <verb>`
