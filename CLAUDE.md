@@ -36,6 +36,11 @@ behavior.
 - Real CLI output is captured as fixtures under `internal/claudecli/testdata/`.
 - UI behavior is tested by driving `Model.Update` directly with key/load
   messages and asserting on `View()` output; no TTY needed.
+- Styling (reverse video, bold) is invisible in `View()` under `go test`:
+  without a TTY lipgloss picks the Ascii profile and strips SGR. Tests
+  asserting on styling force the 16-color profile via the `forceANSI` helper
+  (`internal/ui/row_highlight_test.go`); the profile is package-global, so
+  such tests must not use `t.Parallel()`.
 
 ## Non-obvious constraints
 

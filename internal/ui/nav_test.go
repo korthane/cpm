@@ -78,6 +78,14 @@ func TestVimKeysWorkOnMCPTab(t *testing.T) {
 	}
 }
 
+func TestFooterHelpListsVimAliases(t *testing.T) {
+	m := modelWithCells(t, &claudecli.FakeRunner{}, installedFoo(true))
+
+	if view := m.View(); !strings.Contains(view, "←/→/h/l ↑/↓/j/k: select") {
+		t.Errorf("footer help does not list the vim aliases:\n%s", view)
+	}
+}
+
 func TestVimKeysDuringConfirmationCancelLikeArrows(t *testing.T) {
 	// handleConfirmKey resolves every key before navigation: arrows cancel the
 	// prompt without moving the selection, and the vim aliases must match.

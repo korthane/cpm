@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -25,7 +26,10 @@ func forceANSI(t *testing.T) {
 }
 
 // reverseSGR matches an SGR sequence carrying the reverse-video attribute
-// (7), alone (\x1b[7m) or combined with other attributes (\x1b[1;7m).
+// (7), alone (\x1b[7m) or combined with other attributes (\x1b[1;7m). It
+// would also match a bare 7 inside extended-color params (\x1b[38;5;7m),
+// so it relies on forceANSI pinning the 16-color profile, where colors
+// render as 30–37/90–97 and never emit a lone 7.
 var reverseSGR = regexp.MustCompile(`\x1b\[(?:[0-9]+;)*7(?:;[0-9]+)*m`)
 
 // reversedPinnedCells collects the ANSI-stripped text of every pinned cell
@@ -88,8 +92,14 @@ func TestPinnedCellHighlightTracksScrollWindow(t *testing.T) {
 		m, _ = press(t, m, "down")
 	}
 	view := m.View()
+	stripped := ansi.Strip(view)
+	// Guard the premise: if the chrome budget ever grows the window, this
+	// test would silently stop covering the scrolled path.
+	if !strings.Contains(stripped, "… rows") || strings.Contains(stripped, "n1") {
+		t.Fatalf("window did not scroll (no overflow marker or n1 still visible):\n%s", view)
+	}
 	assertHighlighted(t, view, "n8")
-	if !strings.Contains(ansi.Strip(view), "n8") {
+	if !strings.Contains(stripped, "n8") {
 		t.Fatalf("selected row n8 not visible in the scrolled window:\n%s", view)
 	}
 }
@@ -132,4 +142,28 @@ func TestPinnedCellHighlightFollowsSelectionOnMCPTab(t *testing.T) {
 	assertHighlighted(t, m.View(), "exa")
 	m, _ = press(t, m, "down")
 	assertHighlighted(t, m.View(), "fs")
+}
+
+// pinnedMCPColumn and its viewMCP call site pass a window-relative index
+// separately from the plugins path, so the scrolled window needs its own
+// MCP-tab coverage.
+func TestPinnedCellHighlightTracksScrollWindowOnMCPTab(t *testing.T) {
+	forceANSI(t)
+	servers := make([]claudecli.MCPServer, 9)
+	for i := range servers {
+		servers[i] = claudecli.MCPServer{Name: fmt.Sprintf("srv%d", i+1), Target: "npx x"}
+	}
+	m := mcpModelWithServers(t, &claudecli.FakeRunner{}, servers)
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 14})
+	m = resized.(Model)
+
+	for range 8 {
+		m, _ = press(t, m, "down")
+	}
+	view := m.View()
+	stripped := ansi.Strip(view)
+	if !strings.Contains(stripped, "… rows") || strings.Contains(stripped, "srv1") {
+		t.Fatalf("MCP window did not scroll (no overflow marker or srv1 still visible):\n%s", view)
+	}
+	assertHighlighted(t, view, "srv9")
 }
