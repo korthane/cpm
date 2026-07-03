@@ -22,6 +22,12 @@ import (
 type Profile struct {
 	Path  string `yaml:"path"`
 	Label string `yaml:"label,omitempty"`
+	// IsDefault marks the profile that is $HOME/.claude — the dir the claude
+	// CLI uses when CLAUDE_CONFIG_DIR is unset. On macOS its Keychain entries
+	// live under a different service name than CLAUDE_CONFIG_DIR-set runs,
+	// so the UI needs to know which column may require an env-stripped auth
+	// fallback. Never read from YAML: derived during normalization.
+	IsDefault bool `yaml:"-"`
 }
 
 // Config is the optional ~/.config/cpm/config.yaml document.
@@ -103,6 +109,8 @@ func ResolveProfiles(cliArgs []string, cfg Config, discovered []Profile, homeDir
 // variants like `~/.claude`, `~/.claude/`, or a symlink to it cannot become two
 // columns independently mutating one config dir.
 func normalize(profiles []Profile, homeDir string) ([]Profile, error) {
+	defaultDir := filepath.Join(homeDir, ".claude")
+	defaultPath := seenPath{key: dedupKey(defaultDir), info: statOrNil(defaultDir)}
 	var seen []seenPath
 	out := make([]Profile, 0, len(profiles))
 	for _, p := range profiles {
@@ -121,7 +129,11 @@ func normalize(profiles []Profile, homeDir string) ([]Profile, error) {
 			continue
 		}
 		seen = append(seen, candidate)
-		out = append(out, Profile{Path: path, Label: cmp.Or(p.Label, filepath.Base(path))})
+		out = append(out, Profile{
+			Path:      path,
+			Label:     cmp.Or(p.Label, filepath.Base(path)),
+			IsDefault: isDuplicate([]seenPath{defaultPath}, candidate),
+		})
 	}
 	return out, nil
 }

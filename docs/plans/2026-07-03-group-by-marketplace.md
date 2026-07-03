@@ -137,13 +137,13 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 4: Profile.IsDefault detection in config
 
-- [ ] write failing tests in `internal/config/profile_test.go`: profile
+- [x] write failing tests in `internal/config/profile_test.go`: profile
       resolving to `$HOME/.claude` gets `IsDefault=true` (direct path,
       trailing slash, symlink to it); other paths false
-- [ ] add `IsDefault bool` to `config.Profile`; set in `normalize`
+- [x] add `IsDefault bool` to `config.Profile`; set in `normalize`
       (`internal/config/profile.go`) by comparing the resolved path with
       resolved `$HOME/.claude`
-- [ ] run tests — must pass before task 5
+- [x] run tests — must pass before task 5
 
 ### Task 5: Default-profile auth fallback in UI load path
 

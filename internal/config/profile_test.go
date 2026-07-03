@@ -125,7 +125,7 @@ func TestResolveProfiles(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		want := []Profile{
-			{Path: "/home/tester/.claude", Label: ".claude"},
+			{Path: "/home/tester/.claude", Label: ".claude", IsDefault: true},
 			{Path: "/abs/other", Label: "other"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -139,7 +139,7 @@ func TestResolveProfiles(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		want := []Profile{
-			{Path: "/home/tester/.claude", Label: "cfg-personal"},
+			{Path: "/home/tester/.claude", Label: "cfg-personal", IsDefault: true},
 			{Path: "/home/tester/.claude-work", Label: ".claude-work"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -152,8 +152,12 @@ func TestResolveProfiles(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !reflect.DeepEqual(got, discovered) {
-			t.Fatalf("got %+v, want %+v", got, discovered)
+		want := []Profile{
+			{Path: "/home/tester/.claude", Label: ".claude", IsDefault: true},
+			{Path: "/home/tester/.claude-old", Label: ".claude-old"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
 		}
 	})
 
@@ -163,7 +167,7 @@ func TestResolveProfiles(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		want := []Profile{
-			{Path: "/home/tester/.claude", Label: ".claude"},
+			{Path: "/home/tester/.claude", Label: ".claude", IsDefault: true},
 			{Path: "/home/tester/.other", Label: ".other"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -179,7 +183,7 @@ func TestResolveProfiles(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		want := []Profile{{Path: "/home/tester/.claude", Label: ".claude"}}
+		want := []Profile{{Path: "/home/tester/.claude", Label: ".claude", IsDefault: true}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %+v, want %+v", got, want)
 		}
@@ -249,7 +253,7 @@ func TestResolveProfiles(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		want := []Profile{{Path: realDir, Label: ".claude"}}
+		want := []Profile{{Path: realDir, Label: ".claude", IsDefault: true}}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %+v, want %+v", got, want)
 		}
@@ -282,6 +286,63 @@ func TestResolveProfiles(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "work") {
 			t.Fatalf("err = %v, want it to name the entry's label", err)
+		}
+	})
+}
+
+func TestResolveProfilesIsDefault(t *testing.T) {
+	home := "/home/tester"
+
+	t.Run("direct path to ~/.claude is default, others are not", func(t *testing.T) {
+		got, err := ResolveProfiles([]string{"~/.claude", "~/.claude-work"}, Config{}, nil, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []Profile{
+			{Path: "/home/tester/.claude", Label: ".claude", IsDefault: true},
+			{Path: "/home/tester/.claude-work", Label: ".claude-work"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("trailing slash still detects the default", func(t *testing.T) {
+		got, err := ResolveProfiles([]string{"/home/tester/.claude/"}, Config{}, nil, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || !got[0].IsDefault {
+			t.Fatalf("got %+v, want a single default profile", got)
+		}
+	})
+
+	t.Run("symlink to ~/.claude is default", func(t *testing.T) {
+		tmpHome := t.TempDir()
+		realDir := filepath.Join(tmpHome, ".claude")
+		mustMkdir(t, realDir)
+		link := filepath.Join(tmpHome, "claude-alias")
+		if err := os.Symlink(realDir, link); err != nil {
+			t.Fatal(err)
+		}
+		got, err := ResolveProfiles([]string{link}, Config{}, nil, tmpHome)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 1 || !got[0].IsDefault {
+			t.Fatalf("got %+v, want a single default profile", got)
+		}
+	})
+
+	t.Run("sibling dir named like the default is not default", func(t *testing.T) {
+		got, err := ResolveProfiles([]string{"~/.claude-work", "~/other/.claude"}, Config{}, nil, home)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		for _, p := range got {
+			if p.IsDefault {
+				t.Fatalf("profile %+v must not be default", p)
+			}
 		}
 	})
 }
