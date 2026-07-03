@@ -93,16 +93,16 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 1: Parse full marketplace JSON and add SourceArg
 
-- [ ] write failing tests: `ListMarketplaces` against
+- [x] write failing tests: `ListMarketplaces` against
       `testdata/marketplace_list.json` asserting `Source`, `Repo`, `URL`,
       `Path`, `InstallLocation` for the github/git/directory entries
-- [ ] write failing table test for `Marketplace.SourceArg()`: github→Repo,
+- [x] write failing table test for `Marketplace.SourceArg()`: github→Repo,
       git→URL, directory→Path, unknown source or missing field→""
-- [ ] extend `Marketplace` struct in `internal/claudecli/latest.go` with
+- [x] extend `Marketplace` struct in `internal/claudecli/latest.go` with
       `Source`, `Repo`, `URL`, `Path` JSON fields plus non-JSON
       `CommitHash`, `CommitDate` fields
-- [ ] implement `SourceArg()`
-- [ ] run tests — must pass before task 2
+- [x] implement `SourceArg()`
+- [x] run tests — must pass before task 2
 
 ### Task 2: Marketplace git commit info and Marketplaces in PluginData
 

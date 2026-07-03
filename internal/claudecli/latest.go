@@ -18,7 +18,31 @@ const refreshTimeout = 30 * time.Second
 // Marketplace is one entry of `plugin marketplace list --json`.
 type Marketplace struct {
 	Name            string `json:"name"`
+	Source          string `json:"source"` // github | git | directory
+	Repo            string `json:"repo"`
+	URL             string `json:"url"`
+	Path            string `json:"path"`
 	InstallLocation string `json:"installLocation"`
+	// CommitHash and CommitDate (YYYY-MM-DD) of the marketplace clone are
+	// filled by the loader via git; marketplaces have no version field, so
+	// this is the only freshness signal.
+	CommitHash string `json:"-"`
+	CommitDate string `json:"-"`
+}
+
+// SourceArg returns the argument `plugin marketplace add` needs to configure
+// this marketplace elsewhere, resolved from the source kind. Empty means no
+// usable source is known.
+func (m Marketplace) SourceArg() string {
+	switch m.Source {
+	case "github":
+		return m.Repo
+	case "git":
+		return m.URL
+	case "directory":
+		return m.Path
+	}
+	return ""
 }
 
 // LatestVersions is the resolved latest version per plugin. A missing or empty

@@ -23,10 +23,30 @@ func TestListMarketplacesFixture(t *testing.T) {
 	}
 
 	want := []Marketplace{
-		{Name: "claude-plugins-official", InstallLocation: "/Users/u/.claude/plugins/marketplaces/claude-plugins-official"},
-		{Name: "elastic-agent-skills", InstallLocation: "/Users/u/.claude/plugins/marketplaces/elastic-agent-skills"},
-		{Name: "olomix-cc-thingz", InstallLocation: "/Users/u/src/github.com/olomix/cc-thingz"},
-		{Name: "ralphex", InstallLocation: "/Users/u/.claude/plugins/marketplaces/ralphex"},
+		{
+			Name:            "claude-plugins-official",
+			Source:          "github",
+			Repo:            "anthropics/claude-plugins-official",
+			InstallLocation: "/Users/u/.claude/plugins/marketplaces/claude-plugins-official",
+		},
+		{
+			Name:            "elastic-agent-skills",
+			Source:          "git",
+			URL:             "https://github.com/elastic/agent-skills.git",
+			InstallLocation: "/Users/u/.claude/plugins/marketplaces/elastic-agent-skills",
+		},
+		{
+			Name:            "olomix-cc-thingz",
+			Source:          "directory",
+			Path:            "/Users/u/src/github.com/olomix/cc-thingz",
+			InstallLocation: "/Users/u/src/github.com/olomix/cc-thingz",
+		},
+		{
+			Name:            "ralphex",
+			Source:          "github",
+			Repo:            "umputun/ralphex",
+			InstallLocation: "/Users/u/.claude/plugins/marketplaces/ralphex",
+		},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("len = %d, want %d", len(got), len(want))
@@ -35,6 +55,30 @@ func TestListMarketplacesFixture(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("[%d] = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestMarketplaceSourceArg(t *testing.T) {
+	tests := []struct {
+		name string
+		mkt  Marketplace
+		want string
+	}{
+		{name: "github uses repo", mkt: Marketplace{Source: "github", Repo: "a/b"}, want: "a/b"},
+		{name: "git uses url", mkt: Marketplace{Source: "git", URL: "https://x/y.git"}, want: "https://x/y.git"},
+		{name: "directory uses path", mkt: Marketplace{Source: "directory", Path: "/src/mkt"}, want: "/src/mkt"},
+		{name: "unknown source", mkt: Marketplace{Source: "svn", Repo: "a/b", URL: "u", Path: "p"}, want: ""},
+		{name: "empty source", mkt: Marketplace{Repo: "a/b"}, want: ""},
+		{name: "github without repo", mkt: Marketplace{Source: "github"}, want: ""},
+		{name: "git without url", mkt: Marketplace{Source: "git"}, want: ""},
+		{name: "directory without path", mkt: Marketplace{Source: "directory"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.mkt.SourceArg(); got != tt.want {
+				t.Errorf("SourceArg() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
