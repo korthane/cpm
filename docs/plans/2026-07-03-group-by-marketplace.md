@@ -164,18 +164,18 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 6: BuildPluginGroups in model
 
-- [ ] write failing tests for `BuildPluginGroups` in
+- [x] write failing tests for `BuildPluginGroups` in
       `internal/model`: grouping and sorting (groups by name, plugins by
       name); orphaned plugins (marketplace configured nowhere) still
       grouped; plugin-less marketplaces get a group with empty Plugins;
       per-profile `MarketplaceCell{Configured, CommitHash, CommitDate}`;
       `SourceArg` resolution across profiles; `SourceConflict=true` when
       profiles disagree
-- [ ] add `MarketplaceCell`, `MarketplaceRow`, `PluginGroup` types and
+- [x] add `MarketplaceCell`, `MarketplaceRow`, `PluginGroup` types and
       `BuildPluginGroups(perProfile, latest)` to `internal/model`
       (new file `groups.go`), reusing existing `PluginRow` building
-- [ ] keep 80%+ coverage on `internal/model`
-- [ ] run tests — must pass before task 7
+- [x] keep 80%+ coverage on `internal/model` (100% after this task)
+- [x] run tests — must pass before task 7
 
 ### Task 7: Grouped rendering with fold/unfold
 
