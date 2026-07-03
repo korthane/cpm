@@ -3,3 +3,6 @@
 - [ ] tha path in the header can show ~/.claude instead of /Users/username/.claude to save the space
 - [ ] not all plugins latest version shows
 - [ ] update the marketplace
+- [ ] make j/k navigate rows
+- [ ] make h/l navigate columns
+- [ ] not all plugins have versions. Why?
