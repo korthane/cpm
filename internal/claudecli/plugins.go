@@ -48,10 +48,14 @@ type AvailablePlugin struct {
 }
 
 // PluginData is the parsed output of `plugin list --available --json` for one
-// profile.
+// profile, plus the profile's configured marketplaces.
 type PluginData struct {
 	Installed []InstalledPlugin
 	Available []AvailablePlugin
+	// Marketplaces comes from `plugin marketplace list --json`, with commit
+	// info filled from each clone. Nil when the list failed — marketplace
+	// metadata is best-effort and never fails a load.
+	Marketplaces []Marketplace
 }
 
 type installedJSON struct {

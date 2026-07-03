@@ -106,21 +106,21 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 2: Marketplace git commit info and Marketplaces in PluginData
 
-- [ ] write failing tests for git-info fill: injectable function var
+- [x] write failing tests for git-info fill: injectable function var
       (e.g. `gitCommitInfo func(ctx, dir) (hash, date string, err error)`)
       faked in tests; failure → empty fields, no error propagation
-- [ ] write failing tests: `LoadPluginsFresh` and `LoadPluginsCached`
+- [x] write failing tests: `LoadPluginsFresh` and `LoadPluginsCached`
       return `PluginData.Marketplaces` populated from
       `marketplace list --json` (extend existing FakeRunner-based tests)
-- [ ] add `Marketplaces []claudecli.Marketplace` to `PluginData`
+- [x] add `Marketplaces []claudecli.Marketplace` to `PluginData`
       (`internal/claudecli/plugins.go`); keep the `ListMarketplaces`
       result currently discarded inside `fillFromCatalogFiles`
       (`internal/claudecli/latest.go`)
-- [ ] implement real `gitCommitInfo` via
+- [x] implement real `gitCommitInfo` via
       `git -C <installLocation> log -1 --format=%h %cs` (direct exec, not
       Runner; honors the load context/timeout; any failure → blank fields)
-- [ ] fill `CommitHash`/`CommitDate` on each marketplace during load
-- [ ] run tests — must pass before task 3
+- [x] fill `CommitHash`/`CommitDate` on each marketplace during load
+- [x] run tests — must pass before task 3
 
 ### Task 3: Runner strips ambient CLAUDE_CONFIG_DIR on empty profile dir
 

@@ -98,6 +98,15 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 		return PluginData{}, LatestVersions{}, err
 	}
 
+	// Marketplace metadata is best-effort: a failed list leaves Marketplaces
+	// nil instead of failing the load, and the version fallback below then
+	// has nothing to read catalogs from.
+	markets, mErr := ListMarketplaces(ctx, r, profileDir)
+	if mErr == nil {
+		fillCommitInfo(ctx, markets)
+		data.Marketplaces = markets
+	}
+
 	lv := LatestVersions{Versions: map[PluginID]string{}}
 	for _, a := range data.Available {
 		// Catalogs can list the same plugin twice (e.g. one marketplace under
@@ -115,20 +124,16 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 		}
 	}
 	if unresolved {
-		fillFromCatalogFiles(ctx, r, profileDir, lv.Versions)
+		fillFromCatalogFiles(markets, lv.Versions)
 	}
 	return data, lv, nil
 }
 
 // fillFromCatalogFiles fills empty entries of versions from the on-disk
-// marketplace.json catalogs. Purely best-effort: any failure (marketplace
-// list, missing file, bad JSON) leaves the affected entries empty.
-func fillFromCatalogFiles(ctx context.Context, r Runner, profileDir string, versions map[PluginID]string) {
-	markets, err := ListMarketplaces(ctx, r, profileDir)
-	if err != nil {
-		return
-	}
-
+// marketplace.json catalogs of the already-listed marketplaces. Purely
+// best-effort: any failure (missing file, bad JSON) leaves the affected
+// entries empty.
+func fillFromCatalogFiles(markets []Marketplace, versions map[PluginID]string) {
 	for _, mkt := range markets {
 		var missing []PluginID
 		for id, version := range versions {

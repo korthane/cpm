@@ -145,11 +145,11 @@ func TestLoadPluginsFreshReturnsDataAndVersions(t *testing.T) {
 		t.Errorf("b@m1 = %q, want %q", v, "v1.5.5")
 	}
 
-	// One refresh, then one catalog read — the data and the versions must come
-	// from the same single `plugin list` spawn, run after the refresh so the
-	// versions are fresh.
-	if len(f.Calls) != 2 {
-		t.Fatalf("recorded %d calls, want 2: %v", len(f.Calls), f.Calls)
+	// One refresh, then one catalog read, then one marketplace list — the data
+	// and the versions must come from the same single `plugin list` spawn, run
+	// after the refresh so the versions are fresh.
+	if len(f.Calls) != 3 {
+		t.Fatalf("recorded %d calls, want 3: %v", len(f.Calls), f.Calls)
 	}
 	if strings.Join(f.Calls[0].Args, " ") != "plugin marketplace update" {
 		t.Errorf("first call = %v, want marketplace update", f.Calls[0].Args)
@@ -159,6 +159,104 @@ func TestLoadPluginsFreshReturnsDataAndVersions(t *testing.T) {
 	}
 	if strings.Join(f.Calls[1].Args, " ") != "plugin list --available --json" {
 		t.Errorf("second call = %v, want plugin list", f.Calls[1].Args)
+	}
+	if strings.Join(f.Calls[2].Args, " ") != "plugin marketplace list --json" {
+		t.Errorf("third call = %v, want marketplace list", f.Calls[2].Args)
+	}
+}
+
+func TestLoadPluginsCachedPopulatesMarketplaces(t *testing.T) {
+	stubGitCommitInfo(t, func(_ context.Context, dir string) (string, string, error) {
+		if dir == "/loc/m1" {
+			return "abc1234", "2026-06-28", nil
+		}
+		return "", "", errors.New("not a git repository")
+	})
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin list --available --json": {Stdout: []byte(`{
+				"installed": [],
+				"available": [{"pluginId": "a@m1", "version": "1.2.0", "source": "./a"}]
+			}`)},
+			"plugin marketplace list --json": {Stdout: []byte(`[
+				{"name": "m1", "source": "github", "repo": "a/b", "installLocation": "/loc/m1"},
+				{"name": "m2", "source": "directory", "path": "/src/m2", "installLocation": "/src/m2"}
+			]`)},
+		},
+	}
+
+	data, _, err := LoadPluginsCached(t.Context(), f, "/home/u/.claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []Marketplace{
+		{
+			Name: "m1", Source: "github", Repo: "a/b", InstallLocation: "/loc/m1",
+			CommitHash: "abc1234", CommitDate: "2026-06-28",
+		},
+		// git failed for m2 (a plain directory) — commit fields stay blank.
+		{Name: "m2", Source: "directory", Path: "/src/m2", InstallLocation: "/src/m2"},
+	}
+	if len(data.Marketplaces) != len(want) {
+		t.Fatalf("Marketplaces = %+v, want %d entries", data.Marketplaces, len(want))
+	}
+	for i := range want {
+		if data.Marketplaces[i] != want[i] {
+			t.Errorf("Marketplaces[%d] = %+v, want %+v", i, data.Marketplaces[i], want[i])
+		}
+	}
+	for _, c := range f.Calls {
+		if strings.Join(c.Args, " ") == "plugin marketplace list --json" && c.ProfileDir != "/home/u/.claude" {
+			t.Errorf("marketplace list profile dir = %q, want /home/u/.claude", c.ProfileDir)
+		}
+	}
+}
+
+func TestLoadPluginsFreshPopulatesMarketplaces(t *testing.T) {
+	stubGitCommitInfo(t, func(context.Context, string) (string, string, error) {
+		return "def5678", "2026-07-01", nil
+	})
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin marketplace update": {},
+			"plugin list --available --json": {Stdout: []byte(`{
+				"available": [{"pluginId": "a@m1", "version": "1.0.0", "source": "./a"}]
+			}`)},
+			"plugin marketplace list --json": {Stdout: []byte(`[
+				{"name": "m1", "source": "github", "repo": "a/b", "installLocation": "/loc/m1"}
+			]`)},
+		},
+	}
+
+	data, _, err := LoadPluginsFresh(t.Context(), f, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(data.Marketplaces) != 1 {
+		t.Fatalf("Marketplaces = %+v, want 1 entry", data.Marketplaces)
+	}
+	m := data.Marketplaces[0]
+	if m.Name != "m1" || m.CommitHash != "def5678" || m.CommitDate != "2026-07-01" {
+		t.Errorf("Marketplaces[0] = %+v, want m1 with commit def5678 2026-07-01", m)
+	}
+}
+
+func TestLoadPluginsCachedMarketplaceListFailureIsBestEffort(t *testing.T) {
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin list --available --json": {Stdout: []byte(`{
+				"available": [{"pluginId": "a@m1", "version": "1.0.0", "source": "./a"}]
+			}`)},
+			"plugin marketplace list --json": {Err: errors.New("boom")},
+		},
+	}
+
+	data, _, err := LoadPluginsCached(t.Context(), f, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data.Marketplaces != nil {
+		t.Errorf("Marketplaces = %+v, want nil on list failure", data.Marketplaces)
 	}
 }
 
@@ -376,23 +474,31 @@ func TestLoadPluginsFreshFallbackIsBestEffort(t *testing.T) {
 	}
 }
 
-func TestLoadPluginsFreshSkipsMarketplaceListWhenComplete(t *testing.T) {
+func TestLoadPluginsFreshListsMarketplacesOnce(t *testing.T) {
+	// The marketplace list is always needed (it feeds PluginData.Marketplaces),
+	// and the catalog-file version fallback must reuse that same result rather
+	// than spawn a second list.
 	f := &FakeRunner{
 		Responses: map[string]FakeResponse{
 			"plugin marketplace update": {},
 			"plugin list --available --json": {Stdout: []byte(`{
-				"available": [{"pluginId": "a@m1", "version": "1.0.0", "source": "./a"}]
+				"available": [{"pluginId": "a@m1", "source": {"source": "github"}}]
 			}`)},
+			"plugin marketplace list --json": {Stdout: []byte(`[]`)},
 		},
 	}
 
 	if _, _, err := LoadPluginsFresh(t.Context(), f, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	lists := 0
 	for _, call := range f.Calls {
 		if strings.Join(call.Args, " ") == "plugin marketplace list --json" {
-			t.Error("marketplace list invoked although all versions were resolved")
+			lists++
 		}
+	}
+	if lists != 1 {
+		t.Errorf("marketplace list invoked %d times, want 1", lists)
 	}
 }
 
