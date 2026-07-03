@@ -208,6 +208,130 @@ func TestAuthFailureDegradesToBlankHeader(t *testing.T) {
 	}
 }
 
+const (
+	authLoggedOut = `{"loggedIn":false}`
+	authLoggedIn  = `{"loggedIn":true,"email":"me@example.com","subscriptionType":"max"}`
+)
+
+// authCalls returns the profile dir of every `auth status --json` call, in
+// order.
+func authCalls(r *claudecli.FakeRunner) []string {
+	var dirs []string
+	for _, c := range r.Calls {
+		if strings.Join(c.Args, " ") == "auth status --json" {
+			dirs = append(dirs, c.ProfileDir)
+		}
+	}
+	return dirs
+}
+
+// initModel drives Init and applies every produced message.
+func initModel(t *testing.T, m Model) Model {
+	t.Helper()
+	for _, msg := range drain(t, m.Init()) {
+		updated, _ := m.Update(msg)
+		m = updated.(Model)
+	}
+	return m
+}
+
+func TestDefaultProfileRechecksAuthWithEnvStripped(t *testing.T) {
+	runner := okRunner()
+	runner.ResponsesByDir = map[string]map[string]claudecli.FakeResponse{
+		"/home/u/.claude": {"auth status --json": {Stdout: []byte(authLoggedOut)}},
+		"":                {"auth status --json": {Stdout: []byte(authLoggedIn)}},
+	}
+	m := initModel(t, New(runner, []config.Profile{
+		{Path: "/home/u/.claude", Label: "default", IsDefault: true},
+	}))
+
+	if got := authCalls(runner); !slices.Equal(got, []string{"/home/u/.claude", ""}) {
+		t.Errorf("auth calls = %v, want the dir'd check then the env-stripped fallback", got)
+	}
+	if view := m.View(); !strings.Contains(view, "me@example.com") {
+		t.Errorf("logged-in fallback result not rendered:\n%s", view)
+	}
+}
+
+func TestNonDefaultProfileLoggedOutNeverRechecksAuth(t *testing.T) {
+	runner := okRunner()
+	runner.Responses["auth status --json"] = claudecli.FakeResponse{Stdout: []byte(authLoggedOut)}
+	m := initModel(t, New(runner, testProfiles[:1]))
+
+	if got := authCalls(runner); !slices.Equal(got, []string{"/home/u/.claude"}) {
+		t.Errorf("auth calls = %v, want a single dir'd check", got)
+	}
+	if view := m.View(); !strings.Contains(view, "not logged in") {
+		t.Errorf("logged-out non-default profile should render as logged out:\n%s", view)
+	}
+}
+
+func TestDefaultProfileAuthErrorSkipsFallback(t *testing.T) {
+	runner := okRunner()
+	runner.ResponsesByDir = map[string]map[string]claudecli.FakeResponse{
+		"/home/u/.claude": {"auth status --json": {Err: errors.New("auth read failed")}},
+		"":                {"auth status --json": {Stdout: []byte(authLoggedIn)}},
+	}
+	m := initModel(t, New(runner, []config.Profile{
+		{Path: "/home/u/.claude", Label: "default", IsDefault: true},
+	}))
+
+	// An errored read is not a clean logged-out answer: the fallback must not
+	// mask it, and the header keeps the blank degradation.
+	if got := authCalls(runner); !slices.Equal(got, []string{"/home/u/.claude"}) {
+		t.Errorf("auth calls = %v, want no fallback after an auth error", got)
+	}
+	if view := m.View(); strings.Contains(view, "not logged in") ||
+		strings.Contains(view, "me@example.com") {
+		t.Errorf("auth error should keep the blank header:\n%s", view)
+	}
+}
+
+func TestDefaultProfileKeepsLoggedOutUnlessFallbackIsLoggedIn(t *testing.T) {
+	cases := map[string]claudecli.FakeResponse{
+		"fallback logged out": {Stdout: []byte(authLoggedOut)},
+		"fallback errors":     {Err: errors.New("keychain unavailable")},
+	}
+	for name, resp := range cases {
+		t.Run(name, func(t *testing.T) {
+			runner := okRunner()
+			runner.ResponsesByDir = map[string]map[string]claudecli.FakeResponse{
+				"/home/u/.claude": {"auth status --json": {Stdout: []byte(authLoggedOut)}},
+				"":                {"auth status --json": resp},
+			}
+			m := initModel(t, New(runner, []config.Profile{
+				{Path: "/home/u/.claude", Label: "default", IsDefault: true},
+			}))
+
+			if got := authCalls(runner); !slices.Equal(got, []string{"/home/u/.claude", ""}) {
+				t.Errorf("auth calls = %v, want dir'd check then fallback", got)
+			}
+			// Only a clean logged-in fallback wins; anything else keeps the
+			// original clean logged-out answer.
+			if view := m.View(); !strings.Contains(view, "not logged in") {
+				t.Errorf("profile should stay logged out:\n%s", view)
+			}
+		})
+	}
+}
+
+func TestRefreshProfileAppliesDefaultAuthFallback(t *testing.T) {
+	runner := okRunner()
+	runner.ResponsesByDir = map[string]map[string]claudecli.FakeResponse{
+		"/home/u/.claude": {"auth status --json": {Stdout: []byte(authLoggedOut)}},
+		"":                {"auth status --json": {Stdout: []byte(authLoggedIn)}},
+	}
+	profile := config.Profile{Path: "/home/u/.claude", Label: "default", IsDefault: true}
+
+	msg, ok := refreshProfile(runner, 0, 1, profile, false)().(profileLoadedMsg)
+	if !ok {
+		t.Fatal("refreshProfile did not produce a profileLoadedMsg")
+	}
+	if !msg.auth.LoggedIn || msg.auth.Email != "me@example.com" {
+		t.Errorf("refresh auth = %+v, want the logged-in fallback result", msg.auth)
+	}
+}
+
 func TestStatusLineTruncatedToTerminalWidth(t *testing.T) {
 	// rowWindow budgets exactly one row for the status line; a longer one
 	// would soft-wrap and push the header chrome off the alt screen.

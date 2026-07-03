@@ -15,6 +15,11 @@ import (
 type FakeRunner struct {
 	// Responses maps a space-joined args string to the canned result.
 	Responses map[string]FakeResponse
+	// ResponsesByDir maps a profile dir to args-keyed responses consulted
+	// before Responses, so a test can vary one command's answer per profile
+	// (e.g. the default-profile auth fallback re-runs `auth status` with an
+	// empty dir and must see a different result).
+	ResponsesByDir map[string]map[string]FakeResponse
 	// Default is returned when no key in Responses matches; its zero value
 	// yields empty output and a nil error.
 	Default FakeResponse
@@ -37,7 +42,11 @@ type FakeCall struct {
 // Run records the call and returns the matching canned response, or Default.
 func (f *FakeRunner) Run(_ context.Context, profileDir string, args ...string) ([]byte, error) {
 	f.Calls = append(f.Calls, FakeCall{ProfileDir: profileDir, Args: slices.Clone(args)})
-	if resp, ok := f.Responses[strings.Join(args, " ")]; ok {
+	key := strings.Join(args, " ")
+	if resp, ok := f.ResponsesByDir[profileDir][key]; ok {
+		return resp.Stdout, resp.Err
+	}
+	if resp, ok := f.Responses[key]; ok {
 		return resp.Stdout, resp.Err
 	}
 	return f.Default.Stdout, f.Default.Err

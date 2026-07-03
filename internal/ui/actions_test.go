@@ -287,8 +287,8 @@ func TestEveryUIFiredCommandCarriesTimeout(t *testing.T) {
 	// A hung claude must degrade to a per-column error; a command constructor
 	// losing its context.WithTimeout would freeze that column forever.
 	r := &deadlineCheckRunner{}
-	loadProfile(r, 0, 1, "/h/p0")()
-	refreshProfile(r, 0, 1, "/h/p0", false)()
+	loadProfile(r, 0, 1, config.Profile{Path: "/h/p0"})()
+	refreshProfile(r, 0, 1, config.Profile{Path: "/h/p0"}, false)()
 	loadMCPProfile(r, 0, 1, "/h/p0")()
 	runPluginAction(r, 0, "/h/p0", fooID, "update")()
 	runMCPRemove(r, 0, "/h/p0", "exa")()

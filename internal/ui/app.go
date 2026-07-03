@@ -188,7 +188,7 @@ func (m Model) Init() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.columns)+1)
 	for i := range m.columns {
 		m.columns[i].gen++
-		cmds = append(cmds, loadProfile(m.runner, i, m.columns[i].gen, m.columns[i].profile.Path))
+		cmds = append(cmds, loadProfile(m.runner, i, m.columns[i].gen, m.columns[i].profile))
 	}
 	cmds = append(cmds, m.spinner.Tick)
 	return tea.Batch(cmds...)
@@ -210,7 +210,7 @@ func (m Model) reloadPlugins() tea.Cmd {
 		col.status = statusLoading
 		col.err = nil
 		col.gen++
-		cmds = append(cmds, loadProfile(m.runner, i, col.gen, col.profile.Path))
+		cmds = append(cmds, loadProfile(m.runner, i, col.gen, col.profile))
 	}
 	cmds = append(cmds, m.spinner.Tick)
 	return tea.Batch(cmds...)
@@ -264,39 +264,58 @@ func loadMCPProfile(r claudecli.Runner, index, gen int, profileDir string) tea.C
 	}
 }
 
-func loadProfile(r claudecli.Runner, index, gen int, profileDir string) tea.Cmd {
+func loadProfile(r claudecli.Runner, index, gen int, profile config.Profile) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
 		// The fresh load re-fetches the profile's marketplaces so the pinned
 		// latest versions never come from a stale cache (user requirement).
-		plugins, latest, err := claudecli.LoadPluginsFresh(ctx, r, profileDir)
+		plugins, latest, err := claudecli.LoadPluginsFresh(ctx, r, profile.Path)
 		if err != nil {
 			return profileErrMsg{index: index, gen: gen, err: err}
 		}
 		// A failed auth read degrades to a blank header instead of failing
 		// the whole column. (A logged-out profile is not a failure: the CLI
 		// still prints parseable JSON with loggedIn=false.)
-		auth, authErr := claudecli.LoadAuthStatus(ctx, r, profileDir)
+		auth, authErr := loadAuth(ctx, r, profile)
 		return profileLoadedMsg{index: index, gen: gen, auth: auth, authErr: authErr,
 			plugins: plugins, latest: latest}
 	}
+}
+
+// loadAuth reads a profile's auth status with the default-profile fallback:
+// macOS Keychain namespaces credentials by whether CLAUDE_CONFIG_DIR was set
+// at login, so checking the default ~/.claude profile with the env var set
+// can report logged-out even though a plain `claude` login is active. On a
+// clean logged-out answer for the default profile, re-ask with an empty
+// profile dir (the runner strips the ambient env var) and let a clean
+// logged-in result win. Errors and non-default profiles keep the first
+// answer.
+func loadAuth(ctx context.Context, r claudecli.Runner, profile config.Profile) (claudecli.AuthStatus, error) {
+	auth, err := claudecli.LoadAuthStatus(ctx, r, profile.Path)
+	if !profile.IsDefault || err != nil || auth.LoggedIn {
+		return auth, err
+	}
+	if fallback, fbErr := claudecli.LoadAuthStatus(ctx, r, ""); fbErr == nil && fallback.LoggedIn {
+		return fallback, nil
+	}
+	return auth, nil
 }
 
 // refreshProfile reloads a profile's plugin data after an action without the
 // marketplace refresh: the catalog was fetched moments earlier by the initial
 // load, and a network round-trip per action would stall the action loop.
 // prevStale carries the last refresh outcome forward.
-func refreshProfile(r claudecli.Runner, index, gen int, profileDir string, prevStale bool) tea.Cmd {
+func refreshProfile(r claudecli.Runner, index, gen int, profile config.Profile, prevStale bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		plugins, latest, err := claudecli.LoadPluginsCached(ctx, r, profileDir)
+		plugins, latest, err := claudecli.LoadPluginsCached(ctx, r, profile.Path)
 		if err != nil {
 			return profileErrMsg{index: index, gen: gen, err: err}
 		}
 		latest.Stale = prevStale
-		auth, authErr := claudecli.LoadAuthStatus(ctx, r, profileDir)
+		auth, authErr := loadAuth(ctx, r, profile)
 		return profileLoadedMsg{index: index, gen: gen, auth: auth, authErr: authErr,
 			plugins: plugins, latest: latest}
 	}
@@ -375,7 +394,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		col.err = nil
 		col.gen++
 		cmds := []tea.Cmd{
-			refreshProfile(m.runner, msg.index, col.gen, col.profile.Path, col.latest.Stale),
+			refreshProfile(m.runner, msg.index, col.gen, col.profile, col.latest.Stale),
 			m.spinner.Tick,
 		}
 		// Plugin actions can add or remove plugin-provided MCP servers

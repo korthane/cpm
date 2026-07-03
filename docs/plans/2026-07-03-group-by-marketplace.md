@@ -147,17 +147,20 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 5: Default-profile auth fallback in UI load path
 
-- [ ] write failing UI test: default profile whose
+- [x] write failing UI test: default profile whose
       `auth status --json` (with dir) says logged-out triggers a second
       `auth status --json` call with empty profile dir; logged-in second
       result renders the email/subscription; non-default profiles never
       re-check; auth errors keep blank-cell behavior
-- [ ] thread `IsDefault` from `config.Profile` into the UI column/profile
-      struct (`internal/ui/app.go`)
-- [ ] implement fallback in `loadProfile` and `refreshProfile`: on clean
+- [x] thread `IsDefault` from `config.Profile` into the UI column/profile
+      struct (`internal/ui/app.go`) — `loadProfile`/`refreshProfile` now
+      take the full `config.Profile` (the column already held it)
+- [x] implement fallback in `loadProfile` and `refreshProfile`: on clean
       logged-out result for the default profile, call
       `claudecli.LoadAuthStatus` again with `""`; logged-in result wins
-- [ ] run tests — must pass before task 6
+      (`loadAuth` in `internal/ui/app.go`; FakeRunner gained
+      `ResponsesByDir` so tests can vary a response per profile dir)
+- [x] run tests — must pass before task 6
 
 ### Task 6: BuildPluginGroups in model
 
