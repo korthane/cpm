@@ -77,18 +77,20 @@ terminal theme. Revisit if the user prefers the background variant.
 
 ### Task 1: j/k/h/l navigation aliases
 
-- [ ] write failing UI tests: `j`/`k` change the selected row exactly like
+- [x] write failing UI tests: `j`/`k` change the selected row exactly like
       `down`/`up` (including clamping at first/last row and fold-aware
       `visibleRows`); `h`/`l` change the selected column exactly like
       `left`/`right` (clamping at first/last profile); aliases work on the
       MCP tab too
-- [ ] write failing edge-case tests: during a pending y/n confirmation,
-      `j`/`k`/`h`/`l` behave the same as arrow keys do there (do not
-      confirm, cancel, or corrupt the pending state)
-- [ ] add `"h"`, `"j"`, `"k"`, `"l"` as fallthrough cases beside
+- [x] write failing edge-case tests: during a pending y/n confirmation,
+      `j`/`k`/`h`/`l` behave the same as arrow keys do there (like arrows,
+      they cancel the prompt without running the action or moving the
+      selection — the test passed from the start since `handleConfirmKey`
+      resolves every key before navigation, and now locks that in)
+- [x] add `"h"`, `"j"`, `"k"`, `"l"` as fallthrough cases beside
       `"left"`/`"down"`/`"up"`/`"right"` in `handleKey`
       (`internal/ui/app.go`)
-- [ ] run tests — must pass before task 2
+- [x] run tests — must pass before task 2
 
 ### Task 2: Highlight the selected row's pinned cell
 

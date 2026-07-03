@@ -534,19 +534,19 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tab = (m.tab + tabCount - 1) % tabCount
 		cmd := m.enterTab()
 		return m, cmd
-	case "left":
+	case "left", "h":
 		m.selCol = max(0, m.selCol-1)
 		return m, nil
-	case "right":
+	case "right", "l":
 		m.selCol = min(len(m.columns)-1, m.selCol+1)
 		return m, nil
-	case "up":
+	case "up", "k":
 		// Clamp before moving: a reload can shrink the row set under an
 		// out-of-range selection, which would otherwise need dead presses
 		// to walk back into view.
 		m.selRow = max(0, min(m.selRow, m.rowCount()-1)-1)
 		return m, nil
-	case "down":
+	case "down", "j":
 		m.selRow = min(max(0, m.rowCount()-1), m.selRow+1)
 		return m, nil
 	case "r":
