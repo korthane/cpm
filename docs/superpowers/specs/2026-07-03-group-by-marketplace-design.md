@@ -128,9 +128,10 @@ confirm / timeout machinery (`startAction`, `pendingAction`,
 - `u` → `claude plugin marketplace update <name>` on the selected profile.
   Refused when not configured there.
 - `x` → y/n confirmation (like plugin uninstall), then
-  `claude plugin marketplace remove <name>`. Pass `--scope user` if the CLI
-  accepts it (verify during implementation; `add` documents `--scope`,
-  `remove --help` must be checked).
+  `claude plugin marketplace remove <name> --scope user`. The `--scope`
+  flag is mandatory here: omitting it removes the marketplace from every
+  scope (user, project, local), violating cpm's user-scope-only rule.
+  (`update` has no scope flag; it refreshes the clone, not config.)
 - All marketplace mutations are busy-gated per column like plugin actions;
   a timed-out action is uncertain and forces a column reload.
 
