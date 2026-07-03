@@ -94,6 +94,33 @@ func TestPinnedCellHighlightTracksScrollWindow(t *testing.T) {
 	}
 }
 
+func TestPinnedCellHighlightOnFoldedHeader(t *testing.T) {
+	forceANSI(t)
+	p0 := withMarketplace(installedIn("mp", "a", "b"), "mp", "a1b2c3", "2026-06-28")
+	m := modelWithCells(t, &claudecli.FakeRunner{}, p0)
+
+	m, _ = press(t, m, "enter") // fold: only the header row remains
+	assertHighlighted(t, m.View(), "mp (2 plugins)")
+}
+
+func TestZeroRowsRenderNoHighlightAndNavIsSafe(t *testing.T) {
+	forceANSI(t)
+	m := modelWithCells(t, &claudecli.FakeRunner{}, claudecli.PluginData{})
+
+	if cells := reversedPinnedCells(m.View()); len(cells) != 0 {
+		t.Errorf("reversed pinned cells on an empty matrix = %q, want none", cells)
+	}
+	for _, key := range []string{"j", "k", "h", "l"} {
+		m, _ = press(t, m, key)
+	}
+	if m.selRow != 0 || m.selCol != 0 {
+		t.Errorf("selection on an empty matrix = (%d,%d), want (0,0)", m.selRow, m.selCol)
+	}
+	if cells := reversedPinnedCells(m.View()); len(cells) != 0 {
+		t.Errorf("reversed pinned cells after nav on an empty matrix = %q, want none", cells)
+	}
+}
+
 func TestPinnedCellHighlightFollowsSelectionOnMCPTab(t *testing.T) {
 	forceANSI(t)
 	servers := []claudecli.MCPServer{

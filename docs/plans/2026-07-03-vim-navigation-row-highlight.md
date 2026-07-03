@@ -112,12 +112,17 @@ terminal theme. Revisit if the user prefers the background variant.
 
 ### Task 3: Verify acceptance criteria
 
-- [ ] verify all three Overview items work on both tabs
-- [ ] verify edge cases: empty column list, zero rows, folded groups,
-      confirmation pending, scrolled window
-- [ ] run full test suite (`make test`) — all pass
-- [ ] run `make lint` — all issues fixed
-- [ ] verify coverage still ≥80% on non-UI packages (should be untouched)
+- [x] verify all three Overview items work on both tabs (covered by
+      `nav_test.go` and `row_highlight_test.go` on Plugins and MCP tabs)
+- [x] verify edge cases: empty column list (unreachable — `main.go` errors
+      out on zero profiles before the UI starts), zero rows and folded
+      groups (➕ added `TestZeroRowsRenderNoHighlightAndNavIsSafe` and
+      `TestPinnedCellHighlightOnFoldedHeader`), confirmation pending and
+      scrolled window (already covered)
+- [x] run full test suite (`make test`) — all pass
+- [x] run `make lint` — all issues fixed
+- [x] verify coverage still ≥80% on non-UI packages (claudecli 98.9%,
+      config 98.5%, model 100%)
 
 ### Task 4: Update documentation
 
