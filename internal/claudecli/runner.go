@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,7 +19,8 @@ import (
 // Runner executes the claude CLI against a specific profile directory.
 //
 // profileDir sets CLAUDE_CONFIG_DIR for the invocation so the command targets
-// that profile; an empty profileDir leaves the ambient environment untouched.
+// that profile; an empty profileDir targets the default profile, stripping any
+// ambient CLAUDE_CONFIG_DIR from the environment.
 // Run returns the command's stdout. A non-zero exit is reported as a *RunError
 // carrying the captured stderr.
 type Runner interface {
@@ -70,9 +72,16 @@ func (r *realRunner) Run(ctx context.Context, profileDir string, args ...string)
 	// as the backstop that force-closes the pipes if anything still lingers.
 	setProcessGroup(cmd)
 	cmd.WaitDelay = cmp.Or(r.waitDelay, 5*time.Second)
+	// An empty profileDir means "the default profile": strip any ambient
+	// CLAUDE_CONFIG_DIR inherited from cpm's own environment, which would
+	// otherwise silently redirect the call to another profile.
+	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "CLAUDE_CONFIG_DIR=")
+	})
 	if profileDir != "" {
-		cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+profileDir)
+		env = append(env, "CLAUDE_CONFIG_DIR="+profileDir)
 	}
+	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

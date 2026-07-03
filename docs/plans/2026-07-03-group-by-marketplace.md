@@ -124,16 +124,16 @@ Architecture (decided in spec): pure aggregation (`PluginGroup`,
 
 ### Task 3: Runner strips ambient CLAUDE_CONFIG_DIR on empty profile dir
 
-- [ ] write failing test in `internal/claudecli/runner_test.go`: with
+- [x] write failing test in `internal/claudecli/runner_test.go`: with
       `CLAUDE_CONFIG_DIR` in the parent env and `profileDir == ""`, the
       child env must NOT contain `CLAUDE_CONFIG_DIR` (today it leaks)
-- [ ] implement: in `Runner.Run` (`internal/claudecli/runner.go`), when
+- [x] implement: in `Runner.Run` (`internal/claudecli/runner.go`), when
       profileDir is empty, copy `os.Environ()` filtering out
       `CLAUDE_CONFIG_DIR=` entries; non-empty behavior unchanged
-- [ ] verify existing runner tests still pass (ambient-dir test at
+- [x] verify existing runner tests still pass (ambient-dir test at
       `runner_test.go:99` asserts the OLD leak behavior — update it to the
       new contract)
-- [ ] run tests — must pass before task 4
+- [x] run tests — must pass before task 4
 
 ### Task 4: Profile.IsDefault detection in config
 

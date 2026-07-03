@@ -95,17 +95,26 @@ func TestRealRunnerSetsConfigDirAndArgs(t *testing.T) {
 	}
 }
 
-func TestRealRunnerNoProfileDirLeavesEnvUntouched(t *testing.T) {
+func TestRealRunnerNoProfileDirStripsAmbientConfigDir(t *testing.T) {
+	// An empty profileDir means "the default profile": an ambient
+	// CLAUDE_CONFIG_DIR inherited from cpm's own environment would silently
+	// redirect the call to another profile, so it must be stripped.
 	t.Setenv("CLAUDE_CONFIG_DIR", "/ambient")
-	stub := writeScript(t, "#!/bin/sh\n"+`echo "config=$CLAUDE_CONFIG_DIR"`+"\n")
+	t.Setenv("CPM_TEST_MARKER", "kept")
+	stub := writeScript(t, "#!/bin/sh\n"+
+		`echo "config=${CLAUDE_CONFIG_DIR-unset}"`+"\n"+
+		`echo "marker=$CPM_TEST_MARKER"`+"\n")
 	r := &realRunner{binary: stub}
 
 	out, err := r.Run(t.Context(), "", "auth", "status")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(string(out), "config=/ambient") {
-		t.Errorf("output %q should preserve ambient env", out)
+	if !strings.Contains(string(out), "config=unset") {
+		t.Errorf("output %q should have CLAUDE_CONFIG_DIR stripped", out)
+	}
+	if !strings.Contains(string(out), "marker=kept") {
+		t.Errorf("output %q should keep the rest of the environment", out)
 	}
 }
 
