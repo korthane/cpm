@@ -156,6 +156,11 @@ that matches nothing replaces the table with `no plugins match "…"` (or
 `no MCP servers match "…"`), so an over-narrow filter never reads as an empty
 profile.
 
+A marketplace header whose group the filter narrowed carries the count of what
+it is hiding (`mp (+2 hidden)`): the header's actions — `x` above all, which can
+drop the marketplace's installed plugins — still reach the whole marketplace,
+not just the rows on screen.
+
 `enter` closes the input but keeps the filter applied, so navigation and action
 keys operate on the visible subset. `esc` clears the filter and restores the
 full list, both from inside the input and while navigating an already-filtered

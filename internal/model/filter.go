@@ -26,8 +26,9 @@ func NormalizeQuery(query string) string {
 // re-ranking: groups and plugins keep their input order, because reordering
 // rows under a grouped table is disorienting. A group whose marketplace name
 // matches is kept whole; otherwise it is kept only if some plugin name matches,
-// and then only with the matching plugins. An empty or whitespace-only query
-// returns groups unchanged.
+// and then only with the matching plugins — the rest are counted in
+// HiddenPlugins, because the group's marketplace actions still target them. An
+// empty or whitespace-only query returns groups unchanged.
 func FilterPluginGroups(groups []PluginGroup, query string) []PluginGroup {
 	query = NormalizeQuery(query)
 	if query == "" {
@@ -47,7 +48,11 @@ func FilterPluginGroups(groups []PluginGroup, query string) []PluginGroup {
 			}
 		}
 		if len(plugins) > 0 {
-			out = append(out, PluginGroup{Marketplace: g.Marketplace, Plugins: plugins})
+			out = append(out, PluginGroup{
+				Marketplace:   g.Marketplace,
+				Plugins:       plugins,
+				HiddenPlugins: len(g.Plugins) - len(plugins),
+			})
 		}
 	}
 	return out

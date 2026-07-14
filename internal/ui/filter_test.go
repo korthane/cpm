@@ -437,7 +437,9 @@ func TestHelpWhileFilteringShowsOnlyWorkingKeys(t *testing.T) {
 	m, _ = press(t, m, "/")
 
 	view := m.View()
-	for _, want := range []string{"enter: apply", "esc: cancel"} {
+	// esc drops the filter outright rather than restoring the pre-edit query,
+	// so the label must not promise a cancel that keeps it.
+	for _, want := range []string{"enter: apply", "esc: clear"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("editing help line lacks %q:\n%s", want, view)
 		}
@@ -843,5 +845,42 @@ func TestFilterInputDoesNotBlockConfirmPrompt(t *testing.T) {
 	}
 	if m.pending != nil {
 		t.Error("pending confirmation survived the key, want it resolved (cancelled)")
+	}
+}
+
+// TestFilteredHeaderNamesHiddenPlugins guards the destructive path: a group
+// narrowed to one plugin must not look like a marketplace holding one plugin,
+// because `x` on its header still removes the marketplace — and with it the
+// plugins the filter dropped.
+func TestFilteredHeaderNamesHiddenPlugins(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "a", "l", "p", "h", "a")
+	m, _ = press(t, m, "enter")
+
+	view := m.View()
+	if !strings.Contains(view, "mp (+1 hidden)") {
+		t.Errorf("filtered header does not name the plugin the filter hides:\n%s", view)
+	}
+}
+
+// TestMarketplaceMatchHeaderHidesNothing pins the other side: a marketplace-name
+// match keeps its group whole, so the header must carry no hidden count.
+func TestMarketplaceMatchHeaderHidesNothing(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "m", "p")
+	m, _ = press(t, m, "enter")
+
+	view := m.View()
+	if strings.Contains(view, "hidden") {
+		t.Errorf("whole-group match reports hidden plugins:\n%s", view)
+	}
+	for _, want := range []string{"alpha", "beta"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("marketplace match dropped plugin %q:\n%s", want, view)
+		}
 	}
 }

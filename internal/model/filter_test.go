@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"maps"
 	"slices"
 	"testing"
 
@@ -132,6 +133,54 @@ func TestFilterPluginGroupsDoesNotMutateInput(t *testing.T) {
 	want := []string{"alpha-market", "  foo-bar", "  zebra"}
 	if got := shape(groups); !slices.Equal(got, want) {
 		t.Errorf("input mutated: %v, want %v", got, want)
+	}
+}
+
+// TestFilterPluginGroupsCountsHiddenPlugins pins the signal the UI needs to
+// warn that a narrowed group's marketplace actions reach plugins the filter
+// dropped. A marketplace-name match keeps the group whole, so it hides nothing.
+func TestFilterPluginGroupsCountsHiddenPlugins(t *testing.T) {
+	t.Parallel()
+
+	groups := []model.PluginGroup{
+		group("alpha-market", "foo-bar", "zebra", "quux"),
+		group("beta-market", "foo-baz"),
+	}
+
+	tests := []struct {
+		name  string
+		query string
+		want  map[string]int
+	}{
+		{
+			name:  "plugin match hides the rest of its group",
+			query: "foo",
+			want:  map[string]int{"alpha-market": 2, "beta-market": 0},
+		},
+		{
+			name:  "marketplace match keeps the group whole",
+			query: "alpha",
+			want:  map[string]int{"alpha-market": 0},
+		},
+		{
+			name:  "empty query hides nothing",
+			query: "",
+			want:  map[string]int{"alpha-market": 0, "beta-market": 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := map[string]int{}
+			for _, g := range model.FilterPluginGroups(groups, tt.query) {
+				got[g.Marketplace.Name] = g.HiddenPlugins
+			}
+			if !maps.Equal(got, tt.want) {
+				t.Errorf("FilterPluginGroups(%q) hidden counts = %v, want %v", tt.query, got, tt.want)
+			}
+		})
 	}
 }
 

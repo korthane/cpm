@@ -1146,7 +1146,7 @@ func (m Model) View() string {
 	// While the input is focused every other key types a literal rune, so the
 	// navigation, action and quit hints would all be lies.
 	if m.filterEditing {
-		b.WriteString("\nenter: apply  esc: cancel\n")
+		b.WriteString("\nenter: apply  esc: clear\n")
 		return b.String()
 	}
 	b.WriteString("\n←/→/h/l ↑/↓/j/k: select  tab: switch  /: filter  r: reload  q: quit")
@@ -1644,22 +1644,29 @@ func pinnedGroupColumn(groups []model.PluginGroup, refs []rowRef, start, end, se
 }
 
 // pinnedRowText renders one identity cell: a chevron-prefixed marketplace
-// header (with the hidden plugin count while folded) or an indented plugin
-// name — the group header carries the marketplace, so plugin names drop the
-// `@marketplace` suffix.
+// header (carrying the count of the plugins a fold or a filter hides) or an
+// indented plugin name — the group header carries the marketplace, so plugin
+// names drop the `@marketplace` suffix.
 func pinnedRowText(groups []model.PluginGroup, ref rowRef, folded map[string]bool) string {
 	if ref.kind == rowPlugin {
 		return "  " + groups[ref.group].Plugins[ref.plugin].ID.Name
 	}
 	g := groups[ref.group]
-	if !folded[g.Marketplace.Name] {
-		return chevronUnfolded + " " + g.Marketplace.Name
+	if folded[g.Marketplace.Name] {
+		noun := "plugins"
+		if len(g.Plugins) == 1 {
+			noun = "plugin"
+		}
+		return fmt.Sprintf("%s %s (%d %s)", chevronFolded, g.Marketplace.Name, len(g.Plugins), noun)
 	}
-	noun := "plugins"
-	if len(g.Plugins) == 1 {
-		noun = "plugin"
+	// A filter shows only the matching plugins of a group, but the header's
+	// actions — remove above all, which can drop the marketplace's installed
+	// plugins — still hit the whole marketplace. Name what the filter hides, or
+	// a group narrowed to one row reads as a marketplace holding one plugin.
+	if g.HiddenPlugins > 0 {
+		return fmt.Sprintf("%s %s (+%d hidden)", chevronUnfolded, g.Marketplace.Name, g.HiddenPlugins)
 	}
-	return fmt.Sprintf("%s %s (%d %s)", chevronFolded, g.Marketplace.Name, len(g.Plugins), noun)
+	return chevronUnfolded + " " + g.Marketplace.Name
 }
 
 // pinnedMCPColumn is the MCP identity column: the server name. Cells cover

@@ -38,6 +38,11 @@ type MarketplaceRow struct {
 type PluginGroup struct {
 	Marketplace MarketplaceRow
 	Plugins     []PluginRow
+	// HiddenPlugins counts the plugins FilterPluginGroups dropped from this
+	// group; it is 0 unfiltered. Marketplace actions still target the whole
+	// marketplace, so the UI must be able to say how much a narrowed group
+	// is not showing.
+	HiddenPlugins int
 }
 
 // BuildPluginGroups partitions the plugin comparison matrix by marketplace:

@@ -133,6 +133,14 @@ behavior.
   (and the help line drops `enter: fold`): a fold recorded while filtering
   would be invisible until the filter is cleared, and would then swallow rows
   the user never folded.
+- The same `nil` fold map means a filtered marketplace header renders through
+  the *unfolded* branch of `pinnedRowText`, which would make a group narrowed
+  from five plugins to one look like a marketplace holding one plugin — while
+  `x` on that header still removes the whole marketplace, hidden plugins
+  included. So `FilterPluginGroups` records what it dropped per group
+  (`PluginGroup.HiddenPlugins`) and the header renders it as `(+N hidden)`,
+  the filter's analog of the count a folded header shows. A marketplace-name
+  match keeps its group whole, so it hides nothing and the marker is absent.
 - The `no plugins match` / `no MCP servers match` empty state is gated on the
   *unfiltered* row set being non-empty **and** on every column having loaded
   (`allLoaded`). Loading and errored columns are skipped by
