@@ -100,25 +100,28 @@ Dependencies identified:
 
 ### Task 1: Add fuzzy matcher and row-filtering functions in `internal/model`
 
-- [ ] run `go get github.com/sahilm/fuzzy@v0.1.3` and `go mod tidy`
-- [ ] run `go doc github.com/sahilm/fuzzy` and confirm the exact API before
+- [x] run `go get github.com/sahilm/fuzzy@v0.1.3` and `go mod tidy`
+      (⚠️ `bubbles` already pulls in fuzzy v0.1.1 indirectly, so a bare
+      `go mod tidy` downgrades it back — the `go get` must come last)
+- [x] run `go doc github.com/sahilm/fuzzy` and confirm the exact API before
       coding: we need an **order-preserving** call (`FindNoSort`/`FindFromNoSort`,
       not `Find`, which sorts by score) and the behavior for an empty pattern
-- [ ] write `internal/model/filter_test.go` FIRST — table-driven cases for
+      (empty pattern → nil matches, so the filters guard on `query == ""`)
+- [x] write `internal/model/filter_test.go` FIRST — table-driven cases for
       `FilterPluginGroups`: empty query returns groups unchanged (identity);
       subsequence match (`fb` matches `foo-bar`); case-insensitive; a plugin
       match keeps only matching plugins in its group; a marketplace-name match
       keeps the whole group; a group with neither is dropped; no match anywhere
       returns an empty slice; group and plugin order is preserved (never
       re-ranked)
-- [ ] write tests for `FilterMCPRows`: empty query identity, subsequence match,
+- [x] write tests for `FilterMCPRows`: empty query identity, subsequence match,
       case-insensitive, order preserved, no match → empty
-- [ ] create `internal/model/filter.go` with `FilterPluginGroups(groups
+- [x] create `internal/model/filter.go` with `FilterPluginGroups(groups
       []PluginGroup, query string) []PluginGroup` and `FilterMCPRows(rows
       []MCPRow, query string) []MCPRow`; match `PluginRow.ID.Name` and
       `MarketplaceRow.Name` / `MCPRow.Name`; empty query returns the input
       unchanged
-- [ ] run `make test` and `make lint` — must pass before task 2
+- [x] run `make test` and `make lint` — must pass before task 2
 
 ### Task 2: Add filter state and key handling to `Model` (plugins tab)
 
