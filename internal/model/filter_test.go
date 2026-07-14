@@ -96,6 +96,20 @@ func TestFilterPluginGroups(t *testing.T) {
 			query: ".*",
 			want:  []string{},
 		},
+		{
+			name:  "surrounding whitespace is trimmed, not matched literally",
+			query: "  alpha ",
+			want:  []string{"alpha-market", "  foo-bar", "  zebra"},
+		},
+		{
+			name:  "whitespace-only query is identity",
+			query: "   ",
+			want: []string{
+				"alpha-market", "  foo-bar", "  zebra",
+				"beta-market", "  Foo-Baz", "  quux",
+				"empty-market",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -140,6 +154,12 @@ func TestFilterMCPRows(t *testing.T) {
 		{name: "case-insensitive", query: "PLAY", want: []string{"Playwright"}},
 		{name: "order preserved", query: "t", want: []string{"context7", "Playwright", "postgres"}},
 		{name: "no match", query: "zzz", want: []string{}},
+		{name: "surrounding whitespace is trimmed", query: " play ", want: []string{"Playwright"}},
+		{
+			name:  "whitespace-only query is identity",
+			query: "  ",
+			want:  []string{"context7", "Playwright", "postgres"},
+		},
 	}
 
 	for _, tt := range tests {

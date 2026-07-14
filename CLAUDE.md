@@ -106,7 +106,10 @@ behavior.
   a folded group would otherwise hide matches, and the indicator's match-count
   denominator must come from the *unfiltered* `allPluginGroups`/`allMCPRows`.
   Matching is `sahilm/fuzzy`'s order-preserving `FindNoSort` — plain `Find`
-  sorts by score and would re-rank rows under a grouped table.
+  sorts by score and would re-rank rows under a grouped table. The query is
+  trimmed first (`normalizeQuery`, `internal/model/filter.go`): fuzzy treats a
+  space as a literal rune to find, and no name contains one, so an accidental
+  trailing space would empty the table and read as an over-narrow filter.
 - Because `activeFolds` is `nil` under a filter, `toggleFold` is a no-op there
   (and the help line drops `enter: fold`): a fold recorded while filtering
   would be invisible until the filter is cleared, and would then swallow rows

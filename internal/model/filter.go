@@ -1,6 +1,10 @@
 package model
 
-import "github.com/sahilm/fuzzy"
+import (
+	"strings"
+
+	"github.com/sahilm/fuzzy"
+)
 
 // nameMatches reports whether query fuzzy-matches name as a case-insensitive
 // subsequence. The query is literal text: no glob or regex meaning.
@@ -8,13 +12,21 @@ func nameMatches(query, name string) bool {
 	return len(fuzzy.FindNoSort(query, []string{name})) > 0
 }
 
+// normalizeQuery trims surrounding whitespace: fuzzy matching treats a space as
+// a literal rune to find, and no plugin, marketplace or MCP server name contains
+// one, so a stray leading or trailing space would silently match nothing.
+func normalizeQuery(query string) string {
+	return strings.TrimSpace(query)
+}
+
 // FilterPluginGroups narrows groups to those matching query, without
 // re-ranking: groups and plugins keep their input order, because reordering
 // rows under a grouped table is disorienting. A group whose marketplace name
 // matches is kept whole; otherwise it is kept only if some plugin name matches,
-// and then only with the matching plugins. An empty query returns groups
-// unchanged.
+// and then only with the matching plugins. An empty or whitespace-only query
+// returns groups unchanged.
 func FilterPluginGroups(groups []PluginGroup, query string) []PluginGroup {
+	query = normalizeQuery(query)
 	if query == "" {
 		return groups
 	}
@@ -39,8 +51,9 @@ func FilterPluginGroups(groups []PluginGroup, query string) []PluginGroup {
 }
 
 // FilterMCPRows narrows rows to those whose server name matches query, keeping
-// the input order. An empty query returns rows unchanged.
+// the input order. An empty or whitespace-only query returns rows unchanged.
 func FilterMCPRows(rows []MCPRow, query string) []MCPRow {
+	query = normalizeQuery(query)
 	if query == "" {
 		return rows
 	}
