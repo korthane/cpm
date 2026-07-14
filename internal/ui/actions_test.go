@@ -63,6 +63,8 @@ func press(t *testing.T, m Model, key string) (Model, tea.Cmd) {
 		msg = tea.KeyMsg{Type: tea.KeyCtrlC}
 	case "enter":
 		msg = tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		msg = tea.KeyMsg{Type: tea.KeyEsc}
 	case "space":
 		msg = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
 	}

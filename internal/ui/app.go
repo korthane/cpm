@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -101,6 +103,14 @@ type Model struct {
 	// folded); keyed by name so it survives reloads. Not persisted across
 	// runs. Allocated lazily on the first toggle.
 	folded map[string]bool
+	// filters holds the applied fuzzy name query per tab ("" == no filter);
+	// each tab keeps its own so switching tabs does not carry a query over.
+	filters [tabCount]string
+	// filterInput edits the active tab's query; while filterEditing is true it
+	// takes every key, so the navigation, action and quit keys type literal
+	// runes instead of firing.
+	filterInput   textinput.Model
+	filterEditing bool
 	// pending is a destructive action awaiting y/n confirmation.
 	pending *pendingAction
 	// status is the transient status/error line; cleared on the next key.
@@ -127,12 +137,21 @@ func New(r claudecli.Runner, profiles []config.Profile) Model {
 	for i, p := range profiles {
 		columns[i] = column{profile: p}
 	}
+	input := textinput.New()
+	input.Prompt = filterPrompt
+	// A blinking cursor would keep the event loop (and the tests) ticking for
+	// a caret nobody needs in a one-line filter box.
+	input.Cursor.SetMode(cursor.CursorStatic)
 	return Model{
-		runner:  r,
-		columns: columns,
-		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		runner:      r,
+		columns:     columns,
+		spinner:     spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		filterInput: input,
 	}
 }
+
+// filterPrompt labels the filter input and the closed-but-active indicator.
+const filterPrompt = "filter: "
 
 // profileLoadedMsg delivers one profile's data; index addresses the column
 // and gen the load generation it belongs to.
@@ -515,13 +534,23 @@ func (m Model) anyLoading() bool {
 }
 
 func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The confirmation prompt wins over the filter input: it holds back a
+	// destructive action and must resolve before anything else reads a key.
 	if m.pending != nil {
 		return m.handleConfirmKey(key)
+	}
+	if m.filterEditing {
+		return m.handleFilterKey(key)
 	}
 	m.setStatus("", false)
 	switch key.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "/":
+		return m.openFilter(), nil
+	case "esc":
+		m.filters[m.tab] = ""
+		return m, nil
 	// enterTab mutates scalar Model fields through a pointer receiver, so it
 	// must run before the return operand copies m: the Go spec leaves the
 	// order of a plain operand vs a call in `return m, m.enterTab()`
@@ -604,6 +633,55 @@ func (m *Model) enterTab() tea.Cmd {
 		return m.loadMCPAll()
 	}
 	return nil
+}
+
+// openFilter focuses the filter input on the active tab's query, so `/` on an
+// already-filtered tab refines that query instead of starting over.
+func (m Model) openFilter() Model {
+	m.filterEditing = true
+	m.filterInput.SetValue(m.filters[m.tab])
+	m.filterInput.CursorEnd()
+	m.filterInput.Focus()
+	return m
+}
+
+// closeFilter blurs the input and applies query to the active tab.
+func (m Model) closeFilter(query string) Model {
+	m.filterEditing = false
+	m.filterInput.Blur()
+	m.filters[m.tab] = query
+	return m
+}
+
+// handleFilterKey routes keys while the filter input is focused: enter applies
+// the query, esc drops it, and every other key is typed into the input — so
+// the quit, navigation and action keys are unreachable in this mode. ctrl+c
+// still quits, and tab still switches tabs (closing the input, keeping the
+// query), because neither has a useful meaning as literal text.
+func (m Model) handleFilterKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		return m.closeFilter(""), nil
+	case "enter":
+		return m.closeFilter(m.filterInput.Value()), nil
+	case "tab", "shift+tab":
+		return m.closeFilter(m.filterInput.Value()).handleKey(key)
+	}
+	var cmd tea.Cmd
+	m.filterInput, cmd = m.filterInput.Update(key)
+	m.filters[m.tab] = m.filterInput.Value()
+	return m, cmd
+}
+
+// filterLine renders the filter input while it is focused; it sits above the
+// table header.
+func (m Model) filterLine() string {
+	if !m.filterEditing {
+		return ""
+	}
+	return m.fitWidth(m.filterInput.View()) + "\n"
 }
 
 // handleConfirmKey resolves the confirmation prompt: y runs the held-back
@@ -1097,7 +1175,7 @@ func (m Model) viewPlugins() string {
 		}
 		table.profiles[i] = m.columns[i].groupColumn(i, groups, refs[start:end], rowSel, m.spinner.View())
 	}
-	return table.render() + m.overflowLine(start, end, len(refs))
+	return m.filterLine() + table.render() + m.overflowLine(start, end, len(refs))
 }
 
 // mcpRows builds the MCP comparison matrix from the currently loaded columns.

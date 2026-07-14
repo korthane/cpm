@@ -125,7 +125,7 @@ Dependencies identified:
 
 ### Task 2: Add filter state and key handling to `Model` (plugins tab)
 
-- [ ] write `internal/ui/filter_test.go` FIRST — drive `Model.Update`:
+- [x] write `internal/ui/filter_test.go` FIRST — drive `Model.Update`:
       `/` opens the input (assert `View()` shows the prompt); typing runes lands
       in the input; `q` while editing does NOT quit and appears in the input;
       `d` while editing does NOT start an action (assert the `FakeRunner`
@@ -133,18 +133,21 @@ Dependencies identified:
       the input and clears the query; `esc` with the input closed but a query
       active clears the query; `/` after `enter` re-opens the input pre-filled
       with the previous query
-- [ ] add state to `Model` (app.go:84): `filters [tabCount]string` (per-tab
+- [x] add state to `Model` (app.go:84): `filters [tabCount]string` (per-tab
       applied query), `filterInput textinput.Model`, `filterEditing bool`;
       initialize the input in `New` (app.go:125)
-- [ ] add a `handleFilterKey` branch at the top of `handleKey` (app.go:517),
+      (➕ the input's cursor is set to `cursor.CursorStatic`: a blinking caret
+      would keep the event loop ticking for no benefit, and its blink `tea.Cmd`
+      makes key-driven tests sleep)
+- [x] add a `handleFilterKey` branch at the top of `handleKey` (app.go:517),
       after the existing `m.pending != nil` check: `esc` clears + closes,
       `enter` commits + closes, `ctrl+c` still quits, `tab`/`shift+tab` closes
       the input (keeping the query) and falls through to `enterTab`, every other
       key is forwarded to `textinput.Update` and syncs `m.filters[m.tab]`
-- [ ] bind `/` in the main key switch to open/focus the input pre-filled from
+- [x] bind `/` in the main key switch to open/focus the input pre-filled from
       `m.filters[m.tab]` (cursor at end), and bind bare `esc` to clear an active
       filter
-- [ ] run `make test` and `make lint` — must pass before task 3
+- [x] run `make test` and `make lint` — must pass before task 3
 
 ### Task 3: Apply the filter to visible rows, folding, and selection
 
