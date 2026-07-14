@@ -719,8 +719,9 @@ func (m Model) handleFilterKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // filterLine renders the slot above the table header: the input while it is
 // focused, otherwise — with a query still applied — an indicator carrying the
-// query, how many of total rows survive it, and the key that drops it. A filter
-// that is active but invisible would read as missing plugins.
+// query and how many of total rows survive it. A filter that is active but
+// invisible would read as missing plugins. The key that drops it is advertised
+// in the help line instead, where every other key hint lives.
 //
 // counted says whether the caller's counts are drawn from every column. They
 // are not while any column loads or errors, because the accessors feeding them
@@ -735,10 +736,9 @@ func (m Model) filterLine(match, total int, counted bool) string {
 	if query == "" {
 		return ""
 	}
-	text := fmt.Sprintf("%s%s  esc: clear", filterPrompt, query)
+	text := filterPrompt + query
 	if counted {
-		text = fmt.Sprintf("%s%s (%d/%d)  esc: clear",
-			filterPrompt, query, match, total)
+		text = fmt.Sprintf("%s%s (%d/%d)", filterPrompt, query, match, total)
 	}
 	return statusStyle.Render(m.fitWidth(text)) + "\n"
 }
@@ -1173,6 +1173,9 @@ func (m Model) View() string {
 		return b.String()
 	}
 	b.WriteString("\n←/→/h/l ↑/↓/j/k: select  tab: switch  /: filter  r: reload  q: quit")
+	if m.filters[m.tab] != "" {
+		b.WriteString("  esc: clear filter")
+	}
 	switch {
 	case m.tab == tabMCP:
 		b.WriteString("\nx: remove")

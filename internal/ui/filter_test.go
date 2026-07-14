@@ -338,8 +338,30 @@ func TestFilterIndicatorShownWhileInputClosed(t *testing.T) {
 	if !strings.Contains(view, "filter: be (1/5)") {
 		t.Errorf("View() lacks the query and match count:\n%s", view)
 	}
-	if !strings.Contains(view, "esc: clear") {
-		t.Errorf("View() does not say how to clear the filter:\n%s", view)
+}
+
+// The indicator carries the state; the key that drops the filter belongs in the
+// help line, where the user already reads every other key. Advertised only while
+// a filter is applied — esc does nothing otherwise.
+func TestHelpAdvertisesClearWhileFiltered(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	if view := m.View(); strings.Contains(view, "esc: clear filter") {
+		t.Errorf("idle help line advertises esc with no filter to clear:\n%s", view)
+	}
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "b", "e")
+	m, _ = press(t, m, "enter")
+
+	if view := m.View(); !strings.Contains(view, "esc: clear filter") {
+		t.Errorf("help line does not say how to clear the applied filter:\n%s", view)
+	}
+
+	m, _ = press(t, m, "esc")
+
+	if view := m.View(); strings.Contains(view, "esc: clear filter") {
+		t.Errorf("help line still advertises esc after the filter was cleared:\n%s", view)
 	}
 }
 

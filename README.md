@@ -170,9 +170,9 @@ list. While the input is focused every rune goes into it: `q` does not quit and
 that work in that mode. Only `ctrl+c` (quit) and `tab`/`shift+tab` (which close
 the input, keep the query, and switch tabs) still act, since neither is useful
 as literal text. With the input closed and a filter still applied, an indicator
-above the table shows the query and the match count, so an active filter is
-never invisible. Each tab keeps its own query, so switching tabs does not
-disturb the other's filter.
+above the table shows the query and the match count, and the help line gains
+`esc: clear filter`, so an active filter is never invisible. Each tab keeps its
+own query, so switching tabs does not disturb the other's filter.
 
 Plugins tab, on a plugin row, applied to the selected cell:
 

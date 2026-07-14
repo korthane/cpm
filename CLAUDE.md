@@ -160,8 +160,10 @@ behavior.
   `(match/total)` counts share the same gate: built from the loaded columns
   only, mid-reload both sides are zero and `filter: gam (0/0)` would tell the
   user their query matched nothing over a table of spinners. `filterLine` drops
-  the parenthetical until no column is loading, keeping the query and
-  `esc: clear` visible so the filter is never silent.
+  the parenthetical until no column is loading, keeping the query visible so the
+  filter is never silent. The key that clears it is advertised in the help line
+  (`esc: clear filter`, only while a query is applied), not in the indicator:
+  users look for keys where every other key hint already lives.
 - `rowWindow` (`internal/ui/app.go`) sizes the scroll window as
   `height - chromeLines()`, where `chromeLines` is the count of non-body lines.
   It is not a constant: the filter line adds one, and focusing the filter input
