@@ -219,15 +219,23 @@ Dependencies identified:
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] verify every behavior listed in the Overview is implemented
-- [ ] verify edge cases: filter active during an async column reload; filter
+- [x] verify every behavior listed in the Overview is implemented — each maps to
+      a passing test (open/refine, live filter, enter keeps, esc clears from
+      either mode, rune swallowing, fuzzy plugin+marketplace match, no re-rank,
+      auto-unfold, per-tab query, empty state, indicator, mode-aware help)
+- [x] verify edge cases: filter active during an async column reload; filter
       active while a `y/n` confirm prompt is up (the confirm must still win the
       key); a query that matches only marketplace headers and no plugins;
       zero loaded columns; a query containing regex/glob metacharacters is
       treated as literal text
-- [ ] run the full test suite (`make test`)
-- [ ] run `make lint` — all issues must be fixed
-- [ ] verify coverage is 80%+ on `internal/model` (and not regressed elsewhere)
+      (➕ added `TestFilterSurvivesReload`, `TestFilterOnZeroLoadedColumns`,
+      `TestFilterMatchingOnlyMarketplaceHeader`, `TestFilterQueryIsLiteralText`;
+      the confirm-prompt case was already covered by
+      `TestFilterInputDoesNotBlockConfirmPrompt`)
+- [x] run the full test suite (`make test`)
+- [x] run `make lint` — all issues must be fixed (0 issues)
+- [x] verify coverage is 80%+ on `internal/model` (and not regressed elsewhere)
+      — `model` 100%, `config` 98.5%, `claudecli` 98.9%
 
 ### Task 7: [Final] Update documentation
 

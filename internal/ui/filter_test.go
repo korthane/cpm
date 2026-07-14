@@ -436,6 +436,102 @@ func TestHelpRestoredAfterFilterApplied(t *testing.T) {
 	}
 }
 
+// TestFilterSurvivesReload pins the filter to the tab, not to a load: reloading
+// blanks the columns and refills them asynchronously, and the query must still
+// narrow the rebuilt groups.
+func TestFilterSurvivesReload(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "g", "a", "m")
+	m, _ = press(t, m, "enter")
+
+	m, _ = press(t, m, "r")
+	if got := m.filters[tabPlugins]; got != "gam" {
+		t.Errorf("filters[tabPlugins] = %q after reload, want the query kept", got)
+	}
+	if view := m.View(); strings.Contains(view, "alpha") {
+		t.Errorf("reloading columns un-applied the filter:\n%s", view)
+	}
+
+	reloaded, _ := m.Update(profileLoadedMsg{
+		index: 0, gen: m.columns[0].gen, plugins: multiPlugins(),
+	})
+	m = reloaded.(Model)
+
+	view := m.View()
+	if !strings.Contains(view, "gamma") {
+		t.Errorf("reloaded data lost the matching row:\n%s", view)
+	}
+	if strings.Contains(view, "alpha") {
+		t.Errorf("filter not applied to the reloaded data:\n%s", view)
+	}
+}
+
+// TestFilterOnZeroLoadedColumns guards the degenerate case: no profile has
+// reported yet, so there are no groups for the filter to narrow.
+func TestFilterOnZeroLoadedColumns(t *testing.T) {
+	m := New(okRunner(), nil)
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = resized.(Model)
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "a")
+	m, _ = press(t, m, "enter")
+
+	if view := m.View(); !strings.Contains(view, `no plugins match "a"`) {
+		t.Errorf("View() lacks the empty-result line with no columns loaded:\n%s", view)
+	}
+	// The action would index the empty group list if the filter left it stale.
+	m, _ = press(t, m, "d")
+	if m.pending != nil {
+		t.Error("action key started on an empty filtered list, want it ignored")
+	}
+}
+
+// TestFilterMatchingOnlyMarketplaceHeader covers a filtered list of header rows
+// only: the plugin-less group matches on its own name, and a plugin action key
+// on that header row must be refused rather than index a plugin that is not
+// there.
+func TestFilterMatchingOnlyMarketplaceHeader(t *testing.T) {
+	data := multiPlugins()
+	data.Marketplaces = []claudecli.Marketplace{{Name: "solo", Source: "directory"}}
+	m := modelWithCells(t, okRunner(), data)
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "s", "o", "l")
+	m, _ = press(t, m, "enter")
+
+	view := m.View()
+	if !strings.Contains(view, "solo") {
+		t.Errorf("marketplace-only match dropped its header row:\n%s", view)
+	}
+	for _, gone := range []string{"alpha", "beta", "gamma"} {
+		if strings.Contains(view, gone) {
+			t.Errorf("View() still shows the non-matching plugin %q:\n%s", gone, view)
+		}
+	}
+
+	m, _ = press(t, m, "d")
+	if m.pending != nil {
+		t.Error("plugin action started on a marketplace header row, want it ignored")
+	}
+}
+
+// TestFilterQueryIsLiteralText: the query is fed to a fuzzy matcher, not to a
+// regexp or glob engine, so metacharacters match only themselves.
+func TestFilterQueryIsLiteralText(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, ".", "*")
+
+	view := m.View()
+	if !strings.Contains(view, `no plugins match ".*"`) {
+		t.Errorf("%q was treated as a pattern, not literal text:\n%s", ".*", view)
+	}
+}
+
 func TestFilterInputDoesNotBlockConfirmPrompt(t *testing.T) {
 	runner := okRunner()
 	m := modelWithCells(t, runner, installedFoo(true))
