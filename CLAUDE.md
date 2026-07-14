@@ -150,6 +150,12 @@ behavior.
   enough: with one column loaded and another still loading or errored, the
   total is non-zero, so a no-match query would hide the other column's spinner
   and its `error:` line for as long as the filter is applied.
+  The indicator's `(match/total)` counts are gated on the same `allLoaded` for
+  the same reason: they are built from the loaded columns only, so mid-reload
+  both sides are zero and `filter: gam (0/0)` would tell the user their query
+  matched nothing over a table of spinners — the no-match line's lie, moved one
+  line up. `filterLine` drops the parenthetical until the columns are whole,
+  keeping the query and `esc: clear` visible so the filter is never silent.
 - `rowWindow` (`internal/ui/app.go`) sizes the scroll window as
   `height - chromeLines()`, where `chromeLines` is the count of non-body lines.
   It is not a constant: the filter line adds one, and focusing the filter input

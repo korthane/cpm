@@ -500,6 +500,45 @@ func TestFilterSurvivesReload(t *testing.T) {
 	}
 }
 
+// TestFilterIndicatorDropsCountsWhileLoading is the indicator's half of the
+// rule the no-match line already follows: the counts are built from loaded
+// columns only, so mid-reload they are 0 of 0 — which beside a table of
+// spinners reads as "your query matches nothing". The query and the key that
+// clears it stay; only the numbers wait for the columns.
+func TestFilterIndicatorDropsCountsWhileLoading(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "g", "a", "m")
+	m, _ = press(t, m, "enter")
+
+	if view := m.View(); !strings.Contains(view, "filter: gam (1/5)") {
+		t.Fatalf("loaded columns must still carry the counts:\n%s", view)
+	}
+
+	m, _ = press(t, m, "r")
+
+	view := m.View()
+	if strings.Contains(view, "(0/0)") {
+		t.Errorf("indicator counts a reloading table as no matches:\n%s", view)
+	}
+	for _, want := range []string{"filter: gam", "esc: clear"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() lacks %q while reloading — the filter is still applied:\n%s",
+				want, view)
+		}
+	}
+
+	reloaded, _ := m.Update(profileLoadedMsg{
+		index: 0, gen: m.columns[0].gen, plugins: multiPlugins(),
+	})
+	m = reloaded.(Model)
+
+	if view := m.View(); !strings.Contains(view, "filter: gam (1/5)") {
+		t.Errorf("counts did not come back once the columns loaded:\n%s", view)
+	}
+}
+
 // TestFilterOnZeroLoadedColumns guards the degenerate case: no profile has
 // reported yet, so there are no groups for the filter to narrow.
 func TestFilterOnZeroLoadedColumns(t *testing.T) {

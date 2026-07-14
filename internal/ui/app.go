@@ -720,7 +720,13 @@ func (m Model) handleFilterKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // focused, otherwise — with a query still applied — an indicator carrying the
 // query, how many of total rows survive it, and the key that drops it. A filter
 // that is active but invisible would read as missing plugins.
-func (m Model) filterLine(match, total int) string {
+//
+// counted says whether the caller's counts are drawn from every column. They
+// are not while any column loads or errors, because the accessors feeding them
+// skip such columns — so a reload under a filter would count 0 of 0 and read as
+// "your query matches nothing" over a table of spinners. Same lie the no-match
+// line is gated against, so the counts drop out until the numbers are whole.
+func (m Model) filterLine(match, total int, counted bool) string {
 	if m.filterEditing {
 		return m.fitWidth(m.filterInput.View()) + "\n"
 	}
@@ -728,7 +734,11 @@ func (m Model) filterLine(match, total int) string {
 	if query == "" {
 		return ""
 	}
-	text := fmt.Sprintf("%s%s (%d/%d)  esc: clear", filterPrompt, query, match, total)
+	text := fmt.Sprintf("%s%s  esc: clear", filterPrompt, query)
+	if counted {
+		text = fmt.Sprintf("%s%s (%d/%d)  esc: clear",
+			filterPrompt, query, match, total)
+	}
 	return statusStyle.Render(m.fitWidth(text)) + "\n"
 }
 
@@ -1277,9 +1287,11 @@ func (m Model) viewPlugins() string {
 	// the filter keeps only to hold a matching plugin is not itself a match, so
 	// counting rows would inflate both numbers. Folds are ignored too, so the
 	// count does not move when a group is folded.
+	loaded := m.allLoaded(tabPlugins)
 	line := m.filterLine(
 		model.CountPluginMatches(all, m.filters[tabPlugins]),
 		model.CountPluginEntries(all),
+		loaded,
 	)
 	// Only an empty set of rows drawn from fully loaded columns can mean "the
 	// query excluded everything". Rows are also absent while a column loads or
@@ -1288,7 +1300,7 @@ func (m Model) viewPlugins() string {
 	// marketplaces but no plugins installed still has rows for the query to
 	// exclude.
 	if len(refs) == 0 && len(visibleRefs(all, nil)) > 0 &&
-		m.filters[tabPlugins] != "" && m.allLoaded(tabPlugins) {
+		m.filters[tabPlugins] != "" && loaded {
 		return line + m.noMatchLine("plugins")
 	}
 	selRow := max(0, min(m.selRow, len(refs)-1))
@@ -1344,9 +1356,10 @@ func (m Model) rowCount() int {
 func (m Model) viewMCP() string {
 	all := m.allMCPRows()
 	rows := model.FilterMCPRows(all, m.filters[tabMCP])
-	line := m.filterLine(len(rows), len(all))
+	loaded := m.allLoaded(tabMCP)
+	line := m.filterLine(len(rows), len(all), loaded)
 	// See viewPlugins: loading and errored columns produce no rows either.
-	if len(rows) == 0 && len(all) > 0 && m.filters[tabMCP] != "" && m.allLoaded(tabMCP) {
+	if len(rows) == 0 && len(all) > 0 && m.filters[tabMCP] != "" && loaded {
 		return line + m.noMatchLine("MCP servers")
 	}
 	selRow := max(0, min(m.selRow, len(rows)-1))
