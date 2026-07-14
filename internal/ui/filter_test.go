@@ -749,6 +749,65 @@ func TestFilterQueryStoredTrimmed(t *testing.T) {
 	}
 }
 
+// TestFilterInputScrollsOnNarrowTerminal: bubbles only windows the value once
+// the input has a width, so a query longer than the line must scroll rather
+// than render in full and have its tail — the part being typed, and the cursor
+// with it — chopped off by fitWidth.
+func TestFilterInputScrollsOnNarrowTerminal(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 24})
+	m = resized.(Model)
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, strings.Split("abcdefghijklmnopqrstuvwxyz0123456789", "")...)
+
+	view := m.View()
+	i := lineOf(view, filterPrompt)
+	if i < 0 {
+		t.Fatalf("view has no filter input line:\n%s", view)
+	}
+	line := strings.Split(view, "\n")[i]
+	if !strings.Contains(line, "6789") {
+		t.Errorf("input did not scroll: the query's tail is off-screen:\n%q", line)
+	}
+}
+
+// TestFilterInputWidthTracksTerminal: the input's width is the line minus the
+// prompt and a cell for the cursor, and it has to follow a resize.
+func TestFilterInputWidthTracksTerminal(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 24})
+	m = resized.(Model)
+
+	if want := 30 - len(filterPrompt) - 1; m.filterInput.Width != want {
+		t.Errorf("filterInput.Width = %d, want %d", m.filterInput.Width, want)
+	}
+
+	// A terminal narrower than the prompt must not drive the width negative.
+	resized, _ = m.Update(tea.WindowSizeMsg{Width: 2, Height: 24})
+	m = resized.(Model)
+	if m.filterInput.Width < 0 {
+		t.Errorf("filterInput.Width = %d on a 2-column terminal, want >= 0", m.filterInput.Width)
+	}
+}
+
+// TestFilterCtrlVReachesInput: ctrl+v is the input's paste key, so it must be
+// handed to the input (which answers with a command carrying the clipboard)
+// rather than typed into the query as literal text.
+func TestFilterCtrlVReachesInput(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m, cmd := press(t, m, "ctrl+v")
+
+	if got := m.filterInput.Value(); got != "" {
+		t.Errorf("ctrl+v was typed as text: value = %q, want empty", got)
+	}
+	if cmd == nil {
+		t.Error("ctrl+v produced no command, want the input's paste command")
+	}
+}
+
 func TestFilterInputDoesNotBlockConfirmPrompt(t *testing.T) {
 	runner := okRunner()
 	m := modelWithCells(t, runner, installedFoo(true))

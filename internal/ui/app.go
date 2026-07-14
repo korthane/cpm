@@ -373,6 +373,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Without a width the input never scrolls (bubbles disables its overflow
+		// window at Width <= 0), so a query longer than the line renders in full
+		// and fitWidth chops off the tail — including the cursor. Leave a cell
+		// for the cursor past the value.
+		m.filterInput.Width = max(0, m.width-lipgloss.Width(filterPrompt)-1)
 		return m, nil
 
 	case profileLoadedMsg:
@@ -511,6 +516,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+
+	default:
+		// The input's own keys can emit commands whose replies come back as
+		// messages it must see again — ctrl+v answers with the clipboard's
+		// contents. Nothing else reaches this branch (every other message the
+		// app raises is cased above), so forwarding while editing is what keeps
+		// those keys from silently doing nothing.
+		if m.filterEditing {
+			var cmd tea.Cmd
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			m.setQuery(m.filterInput.Value())
+			return m, cmd
+		}
 	}
 	return m, nil
 }
