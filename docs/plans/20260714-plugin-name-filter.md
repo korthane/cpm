@@ -172,30 +172,36 @@ Dependencies identified:
 
 ### Task 4: Render the filter line, empty state, and layout
 
-- [ ] write tests FIRST — the input renders above the table header; with the
+- [x] write tests FIRST — the input renders above the table header; with the
       input closed and a query active, the persistent indicator shows the query,
       the match count and `esc: clear` (e.g. `filter: foo (7/42)  esc: clear`);
       a query matching nothing renders a "no plugins match" line instead of an
       empty table; the visible row count shrinks by one when the filter line is
       present (scroll-window regression: assert against a short `WindowSizeMsg`
       height)
-- [ ] write tests FIRST for the help line in all three states: idle (advertises
+- [x] write tests FIRST for the help line in all three states: idle (advertises
       `/: filter` alongside the existing hints); **editing** (shows only the keys
       that work — `enter: apply  esc: cancel` — and does NOT advertise the
       navigation/action/quit keys, since `q`, `j`/`k` and `e/d/u/x/i` all type
       literal runes while the input is focused); closed-but-filtered (back to the
       normal navigation hints, since every key works again)
-- [ ] render the filter line in `viewPlugins` (app.go:1081) above the header,
+- [x] render the filter line in `viewPlugins` (app.go:1081) above the header,
       and the closed-but-active indicator in the same slot
-- [ ] make the hard-coded `const chrome = 11` in `rowWindow` (app.go:1151)
+      (➕ the indicator's match count needs the *unfiltered* row total, so
+      `pluginGroups` was split into `allPluginGroups` (raw) + `pluginGroups`
+      (filtered); the denominator ignores folds so it does not move when a
+      group is folded)
+- [x] make the hard-coded `const chrome = 11` in `rowWindow` (app.go:1151)
       account for the extra filter line instead of a fixed literal — it is the
       count of non-body lines and silently breaks scrolling otherwise
-- [ ] add `/: filter` to the help line (app.go:1008) and swap it for the
+      (➕ now `chromeLines()`: +1 for the filter line, −1 while editing because
+      the action help line is suppressed)
+- [x] add `/: filter` to the help line (app.go:1008) and swap it for the
       editing-mode hints while `m.filterEditing` is true
-- [ ] suppress the second, context-dependent help line (the marketplace-action
+- [x] suppress the second, context-dependent help line (the marketplace-action
       hints, app.go:1009-1016) while the input is focused — no action key is
       reachable in that mode
-- [ ] run `make test` and `make lint` — must pass before task 5
+- [x] run `make test` and `make lint` — must pass before task 5
 
 ### Task 5: Extend the filter to the MCP tab (separate per-tab query)
 

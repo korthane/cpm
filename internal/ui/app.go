@@ -686,13 +686,32 @@ func (m Model) handleFilterKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// filterLine renders the filter input while it is focused; it sits above the
-// table header.
-func (m Model) filterLine() string {
-	if !m.filterEditing {
+// filterLine renders the slot above the table header: the input while it is
+// focused, otherwise — with a query still applied — an indicator carrying the
+// query, how many of total rows survive it, and the key that drops it. A filter
+// that is active but invisible would read as missing plugins.
+func (m Model) filterLine(match, total int) string {
+	if m.filterEditing {
+		return m.fitWidth(m.filterInput.View()) + "\n"
+	}
+	query := m.filters[m.tab]
+	if query == "" {
 		return ""
 	}
-	return m.fitWidth(m.filterInput.View()) + "\n"
+	text := fmt.Sprintf("%s%s (%d/%d)  esc: clear", filterPrompt, query, match, total)
+	return statusStyle.Render(m.fitWidth(text)) + "\n"
+}
+
+// filterVisible reports whether the active tab renders the filter line.
+func (m Model) filterVisible() bool {
+	return m.filterEditing || m.filters[m.tab] != ""
+}
+
+// noMatchLine replaces the table when the query matches nothing, so an active
+// filter is never mistaken for an empty profile.
+func (m Model) noMatchLine(kind string) string {
+	text := fmt.Sprintf("no %s match %q", kind, m.filters[m.tab])
+	return statusStyle.Render(m.fitWidth(text)) + "\n"
 }
 
 // handleConfirmKey resolves the confirmation prompt: y runs the held-back
@@ -1094,7 +1113,13 @@ func (m Model) View() string {
 
 	b.WriteString("\n")
 	b.WriteString(m.statusLine())
-	b.WriteString("\n←/→/h/l ↑/↓/j/k: select  tab: switch  r: reload  q: quit")
+	// While the input is focused every other key types a literal rune, so the
+	// navigation, action and quit hints would all be lies.
+	if m.filterEditing {
+		b.WriteString("\nenter: apply  esc: cancel\n")
+		return b.String()
+	}
+	b.WriteString("\n←/→/h/l ↑/↓/j/k: select  tab: switch  /: filter  r: reload  q: quit")
 	switch {
 	case m.tab == tabMCP:
 		b.WriteString("\nx: remove")
@@ -1146,11 +1171,12 @@ func (m Model) fitWidth(s string) string {
 	return truncate(s, m.width)
 }
 
-// pluginGroups builds the grouped comparison data (marketplace header rows
+// allPluginGroups builds the grouped comparison data (marketplace header rows
 // plus their plugin rows) from the currently loaded columns and reports
 // whether any latest versions are stale (a marketplace refresh failed, so
-// that profile fell back to its cached catalog).
-func (m Model) pluginGroups() ([]model.PluginGroup, bool) {
+// that profile fell back to its cached catalog). The name filter is not
+// applied — see pluginGroups.
+func (m Model) allPluginGroups() ([]model.PluginGroup, bool) {
 	perProfile := make([]claudecli.PluginData, len(m.columns))
 	perLatest := make([]claudecli.LatestVersions, len(m.columns))
 	for i := range m.columns {
@@ -1165,7 +1191,22 @@ func (m Model) pluginGroups() ([]model.PluginGroup, bool) {
 	}
 	latest, stale := model.MergeLatestVersions(perLatest)
 	groups := model.BuildPluginGroups(perProfile, latest)
+	return groups, stale
+}
+
+// pluginGroups is allPluginGroups narrowed by the plugins tab's query — the
+// choke point every consumer (view, row count, folding, actions) reads.
+func (m Model) pluginGroups() ([]model.PluginGroup, bool) {
+	groups, stale := m.allPluginGroups()
 	return model.FilterPluginGroups(groups, m.filters[tabPlugins]), stale
+}
+
+// totalPluginRows is the unfiltered row count the filter indicator compares
+// against. Folds are ignored so the denominator does not move when a group is
+// folded.
+func (m Model) totalPluginRows() int {
+	groups, _ := m.allPluginGroups()
+	return len(visibleRefs(groups, nil))
 }
 
 // activeFolds is the fold map in effect for the current render: none while a
@@ -1187,6 +1228,10 @@ func (m Model) visiblePluginRefs(groups []model.PluginGroup) []rowRef {
 func (m Model) viewPlugins() string {
 	groups, stale := m.pluginGroups()
 	refs := m.visiblePluginRefs(groups)
+	line := m.filterLine(len(refs), m.totalPluginRows())
+	if len(refs) == 0 && m.filters[tabPlugins] != "" {
+		return line + m.noMatchLine("plugins")
+	}
 	selRow := max(0, min(m.selRow, len(refs)-1))
 	start, end := m.rowWindow(len(refs))
 
@@ -1203,7 +1248,7 @@ func (m Model) viewPlugins() string {
 		}
 		table.profiles[i] = m.columns[i].groupColumn(i, groups, refs[start:end], rowSel, m.spinner.View())
 	}
-	return m.filterLine() + table.render() + m.overflowLine(start, end, len(refs))
+	return line + table.render() + m.overflowLine(start, end, len(refs))
 }
 
 // mcpRows builds the MCP comparison matrix from the currently loaded columns.
@@ -1257,11 +1302,7 @@ func (m Model) viewMCP() string {
 func (m Model) rowWindow(total int) (start, end int) {
 	capacity := total
 	if m.height > 0 {
-		// Fixed chrome around the body: tab bar and blank line, three
-		// header lines, separator, trailing blank, status line, two help
-		// lines, and the overflow marker.
-		const chrome = 11
-		capacity = max(1, m.height-chrome)
+		capacity = max(1, m.height-m.chromeLines())
 	}
 	if capacity >= total {
 		return 0, total
@@ -1269,6 +1310,22 @@ func (m Model) rowWindow(total int) (start, end int) {
 	sel := min(m.selRow, total-1)
 	start = min(max(0, sel-capacity+1), total-capacity)
 	return start, start + capacity
+}
+
+// chromeLines counts the lines the body must leave to the rest of the view;
+// an undercount silently scrolls the header chrome off-screen.
+func (m Model) chromeLines() int {
+	// Tab bar and blank line, three header lines, separator, trailing blank,
+	// status line, two help lines, and the overflow marker.
+	lines := 11
+	if m.filterVisible() {
+		lines++
+	}
+	if m.filterEditing {
+		// The action help line is suppressed while the input is focused.
+		lines--
+	}
+	return lines
 }
 
 // overflowLine marks rows hidden by the vertical window.

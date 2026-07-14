@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -289,6 +290,149 @@ func TestActionOnFilteredRowTargetsSelectedPlugin(t *testing.T) {
 	want := []string{"plugin", "disable", "--scope", "user", "beta@mp"}
 	if !slices.Equal(calls[0].Args, want) {
 		t.Errorf("args = %v, want %v", calls[0].Args, want)
+	}
+}
+
+// lineOf returns the index of the first view line containing want, or -1.
+func lineOf(view, want string) int {
+	for i, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, want) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestFilterInputRendersAboveTableHeader(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+
+	view := m.View()
+	input, header := lineOf(view, filterPrompt), lineOf(view, "/h/p0")
+	if input < 0 || header < 0 {
+		t.Fatalf("input line %d, header line %d — both must render:\n%s", input, header, view)
+	}
+	if input >= header {
+		t.Errorf("filter input on line %d, table header on line %d, want the input above:\n%s",
+			input, header, view)
+	}
+}
+
+func TestFilterIndicatorShownWhileInputClosed(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "b", "e")
+	m, _ = press(t, m, "enter")
+
+	// Rows: mp, alpha, beta, other, gamma — "be" keeps the mp header and beta.
+	view := m.View()
+	if !strings.Contains(view, "filter: be (2/5)") {
+		t.Errorf("View() lacks the query and match count:\n%s", view)
+	}
+	if !strings.Contains(view, "esc: clear") {
+		t.Errorf("View() does not say how to clear the filter:\n%s", view)
+	}
+}
+
+func TestFilterIndicatorGoneWhenQueryCleared(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "b", "e")
+	m, _ = press(t, m, "enter")
+	m, _ = press(t, m, "esc")
+
+	if view := m.View(); strings.Contains(view, filterPrompt) {
+		t.Errorf("filter line still rendered after the query was cleared:\n%s", view)
+	}
+}
+
+func TestFilterWithNoMatchesShowsMessage(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "z", "z", "z")
+
+	view := m.View()
+	if !strings.Contains(view, `no plugins match "zzz"`) {
+		t.Errorf("View() lacks the empty-result line:\n%s", view)
+	}
+	if strings.Contains(view, "alpha") {
+		t.Errorf("View() still renders rows for a query that matches nothing:\n%s", view)
+	}
+}
+
+// TestFilterLineShrinksRowWindow guards the scroll window: the filter line is
+// one more non-body line, so the same terminal height must fit one row fewer.
+func TestFilterLineShrinksRowWindow(t *testing.T) {
+	installed := make([]claudecli.InstalledPlugin, 20)
+	for i := range installed {
+		installed[i] = claudecli.InstalledPlugin{
+			ID:      claudecli.PluginID{Name: fmt.Sprintf("plug%02d", i), Marketplace: "mp"},
+			Version: "1.0.0", Enabled: true,
+		}
+	}
+	m := modelWithCells(t, okRunner(), claudecli.PluginData{Installed: installed})
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 16})
+	m = resized.(Model)
+
+	if view := m.View(); !strings.Contains(view, "… rows 1–5 of 21") {
+		t.Fatalf("unfiltered window is not 5 rows:\n%s", view)
+	}
+
+	// "p" matches the mp marketplace, so every row survives the filter and only
+	// the extra filter line can change the window.
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "p")
+	m, _ = press(t, m, "enter")
+
+	if view := m.View(); !strings.Contains(view, "… rows 1–4 of 21") {
+		t.Errorf("filter line did not shrink the row window to 4:\n%s", view)
+	}
+}
+
+func TestHelpAdvertisesFilterKey(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	if view := m.View(); !strings.Contains(view, "/: filter") {
+		t.Errorf("idle help line does not advertise the filter key:\n%s", view)
+	}
+}
+
+func TestHelpWhileFilteringShowsOnlyWorkingKeys(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+
+	view := m.View()
+	for _, want := range []string{"enter: apply", "esc: cancel"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("editing help line lacks %q:\n%s", want, view)
+		}
+	}
+	// Every one of these types a literal rune while the input is focused.
+	for _, gone := range []string{"q: quit", "r: reload", "i: add", "e: enable"} {
+		if strings.Contains(view, gone) {
+			t.Errorf("editing help line still advertises %q:\n%s", gone, view)
+		}
+	}
+}
+
+func TestHelpRestoredAfterFilterApplied(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "b", "e")
+	m, _ = press(t, m, "enter")
+
+	view := m.View()
+	if !strings.Contains(view, "q: quit") {
+		t.Errorf("navigation help not restored once the input closed:\n%s", view)
+	}
+	if strings.Contains(view, "enter: apply") {
+		t.Errorf("editing help line still rendered with the input closed:\n%s", view)
 	}
 }
 
