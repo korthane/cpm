@@ -205,15 +205,17 @@ Dependencies identified:
 
 ### Task 5: Extend the filter to the MCP tab (separate per-tab query)
 
-- [ ] write tests FIRST — `/` on the MCP tab filters server names; each tab keeps
+- [x] write tests FIRST — `/` on the MCP tab filters server names; each tab keeps
       its own query across `tab`/`shift+tab` switches (filter the plugins tab,
       switch to MCP, confirm the MCP list is unfiltered, switch back, confirm the
       plugin filter is still applied); switching tabs while the input is focused
       closes the input but preserves both queries; an MCP remove action on a
       filtered row targets the right server
-- [ ] apply `model.FilterMCPRows` inside `m.mcpRows()` (app.go:1104) and render
+- [x] apply `model.FilterMCPRows` inside `m.mcpRows()` (app.go:1104) and render
       the filter line / empty state in `viewMCP` (app.go:1127)
-- [ ] run `make test` and `make lint` — must pass before task 6
+      (➕ `mcpRows` split into `allMCPRows` (raw) + `mcpRows` (filtered), mirroring
+      the plugins tab, since the indicator's denominator needs the raw total)
+- [x] run `make test` and `make lint` — must pass before task 6
 
 ### Task 6: Verify acceptance criteria
 

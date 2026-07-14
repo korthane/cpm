@@ -1251,8 +1251,9 @@ func (m Model) viewPlugins() string {
 	return line + table.render() + m.overflowLine(start, end, len(refs))
 }
 
-// mcpRows builds the MCP comparison matrix from the currently loaded columns.
-func (m Model) mcpRows() []model.MCPRow {
+// allMCPRows builds the MCP comparison matrix from the currently loaded
+// columns, before the tab's filter narrows it.
+func (m Model) allMCPRows() []model.MCPRow {
 	perProfile := make([][]claudecli.MCPServer, len(m.columns))
 	for i := range m.columns {
 		// Same as pluginMatrix: an errored column renders blank cells, so its
@@ -1263,6 +1264,12 @@ func (m Model) mcpRows() []model.MCPRow {
 		perProfile[i] = m.columns[i].mcp
 	}
 	return model.BuildMCPMatrix(perProfile)
+}
+
+// mcpRows is allMCPRows narrowed by the MCP tab's query — the choke point every
+// consumer (view, row count, remove action) reads.
+func (m Model) mcpRows() []model.MCPRow {
+	return model.FilterMCPRows(m.allMCPRows(), m.filters[tabMCP])
 }
 
 // rowCount is the active tab's number of visible rows; it bounds the row
@@ -1277,6 +1284,10 @@ func (m Model) rowCount() int {
 
 func (m Model) viewMCP() string {
 	rows := m.mcpRows()
+	line := m.filterLine(len(rows), len(m.allMCPRows()))
+	if len(rows) == 0 && m.filters[tabMCP] != "" {
+		return line + m.noMatchLine("MCP servers")
+	}
 	selRow := max(0, min(m.selRow, len(rows)-1))
 	start, end := m.rowWindow(len(rows))
 
@@ -1293,7 +1304,7 @@ func (m Model) viewMCP() string {
 		}
 		table.profiles[i] = m.columns[i].mcpColumn(i, rows[start:end], rowSel, m.spinner.View())
 	}
-	return table.render() + m.overflowLine(start, end, len(rows))
+	return line + table.render() + m.overflowLine(start, end, len(rows))
 }
 
 // rowWindow bounds the matrix rows rendered so the table fits the terminal
