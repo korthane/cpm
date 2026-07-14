@@ -175,3 +175,56 @@ func TestFilterMCPRows(t *testing.T) {
 		})
 	}
 }
+
+// The counter and the filter must agree on what a match is: every count below
+// is the number of entries FilterPluginGroups keeps as matches, not the number
+// of rows it renders.
+func TestCountPluginMatches(t *testing.T) {
+	t.Parallel()
+
+	groups := []model.PluginGroup{
+		group("alpha-market", "foo-bar", "zebra"),
+		group("beta-market", "quux"),
+		group("empty-market"),
+	}
+
+	if got, want := model.CountPluginEntries(groups), 6; got != want {
+		t.Errorf("CountPluginEntries() = %d, want %d", got, want)
+	}
+
+	tests := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{"empty query counts every entry", "", 6},
+		{"whitespace-only query counts every entry", "  ", 6},
+		{"plugin match excludes the header kept to hold it", "zebra", 1},
+		{"marketplace match takes its whole group", "alpha", 3},
+		{"plugin-less marketplace match still counts", "empty", 1},
+		{"no match", "nothing", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := model.CountPluginMatches(groups, tt.query); got != tt.want {
+				t.Errorf("CountPluginMatches(%q) = %d, want %d", tt.query, got, tt.want)
+			}
+		})
+	}
+}
+
+// A plugin id without `@marketplace` lands in a synthetic group whose name is
+// empty, which no query can match — so it must not count as an entry.
+func TestCountPluginEntriesSkipsUnnamedMarketplace(t *testing.T) {
+	t.Parallel()
+
+	groups := []model.PluginGroup{group("", "solo")}
+
+	if got, want := model.CountPluginEntries(groups), 1; got != want {
+		t.Errorf("CountPluginEntries() = %d, want %d", got, want)
+	}
+	if got, want := model.CountPluginMatches(groups, "solo"), 1; got != want {
+		t.Errorf("CountPluginMatches(%q) = %d, want %d", "solo", got, want)
+	}
+}

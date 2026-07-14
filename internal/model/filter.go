@@ -53,6 +53,49 @@ func FilterPluginGroups(groups []PluginGroup, query string) []PluginGroup {
 	return out
 }
 
+// CountPluginEntries is the number of matchable names in groups: every plugin
+// plus every named marketplace. A marketplace name is matchable and its header
+// row is a result of its own — one that carries marketplace actions even when
+// the marketplace holds no plugins. The synthetic group BuildPluginGroups makes
+// for plugins with no marketplace has an empty name, which no query can match,
+// so it is not an entry: counting it would inflate the denominator.
+func CountPluginEntries(groups []PluginGroup) int {
+	n := 0
+	for _, g := range groups {
+		if g.Marketplace.Name != "" {
+			n++
+		}
+		n += len(g.Plugins)
+	}
+	return n
+}
+
+// CountPluginMatches counts the entries FilterPluginGroups keeps as matches, so
+// the two agree on what a match is. A marketplace-name match matches its whole
+// group — the header and every plugin the filter keeps under it. Otherwise only
+// the matching plugins count: the header row kept to hold them is context, not a
+// match, and counting it would report (2/5) where one plugin of three matched.
+func CountPluginMatches(groups []PluginGroup, query string) int {
+	query = NormalizeQuery(query)
+	if query == "" {
+		return CountPluginEntries(groups)
+	}
+
+	n := 0
+	for _, g := range groups {
+		if nameMatches(query, g.Marketplace.Name) {
+			n += 1 + len(g.Plugins)
+			continue
+		}
+		for _, p := range g.Plugins {
+			if nameMatches(query, p.ID.Name) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // FilterMCPRows narrows rows to those whose server name matches query, keeping
 // the input order. An empty or whitespace-only query returns rows unchanged.
 func FilterMCPRows(rows []MCPRow, query string) []MCPRow {

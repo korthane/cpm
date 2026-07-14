@@ -1269,25 +1269,18 @@ func (m Model) visiblePluginRefs(groups []model.PluginGroup) []rowRef {
 	return visibleRefs(groups, m.activeFolds())
 }
 
-// countPlugins is the plugin total across groups, excluding the marketplace
-// header rows — the unit the filter indicator reports.
-func countPlugins(groups []model.PluginGroup) int {
-	n := 0
-	for i := range groups {
-		n += len(groups[i].Plugins)
-	}
-	return n
-}
-
 func (m Model) viewPlugins() string {
 	all, stale := m.allPluginGroups()
 	groups := model.FilterPluginGroups(all, m.filters[tabPlugins])
 	refs := m.visiblePluginRefs(groups)
-	// The indicator counts plugins, not rows: the user typed a plugin name, so
-	// counting the marketplace header rows the filter keeps alongside a match
-	// would inflate both numbers. Folds are ignored too, so the count does not
-	// move when a group is folded.
-	line := m.filterLine(countPlugins(groups), countPlugins(all))
+	// The indicator counts matched entries, not rows: a marketplace header row
+	// the filter keeps only to hold a matching plugin is not itself a match, so
+	// counting rows would inflate both numbers. Folds are ignored too, so the
+	// count does not move when a group is folded.
+	line := m.filterLine(
+		model.CountPluginMatches(all, m.filters[tabPlugins]),
+		model.CountPluginEntries(all),
+	)
 	// Only an empty set of rows drawn from fully loaded columns can mean "the
 	// query excluded everything". Rows are also absent while a column loads or
 	// after it errors, and there the table must still render its spinner and

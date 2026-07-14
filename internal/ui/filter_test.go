@@ -331,10 +331,11 @@ func TestFilterIndicatorShownWhileInputClosed(t *testing.T) {
 	m = typeKeys(t, m, "b", "e")
 	m, _ = press(t, m, "enter")
 
-	// Plugins: alpha, beta, gamma — "be" matches beta alone. The mp header row
-	// the filter keeps alongside it is not a match and must not be counted.
+	// Entries: plugins alpha, beta, gamma under marketplaces mp and other —
+	// "be" matches beta alone. The mp header row the filter keeps alongside it
+	// is not a match and must not be counted.
 	view := m.View()
-	if !strings.Contains(view, "filter: be (1/3)") {
+	if !strings.Contains(view, "filter: be (1/5)") {
 		t.Errorf("View() lacks the query and match count:\n%s", view)
 	}
 	if !strings.Contains(view, "esc: clear") {
@@ -342,9 +343,9 @@ func TestFilterIndicatorShownWhileInputClosed(t *testing.T) {
 	}
 }
 
-// A marketplace-name match keeps the group whole, so every plugin under it is
-// a match — but the header row it kept them under is still not one.
-func TestFilterIndicatorCountsPluginsNotMarketplaceHeaders(t *testing.T) {
+// A marketplace-name match keeps the group whole, so the header and every
+// plugin under it count — the query matched them all through the marketplace.
+func TestFilterIndicatorCountsMatchedMarketplaceGroupWhole(t *testing.T) {
 	m := modelWithCells(t, okRunner(), multiPlugins())
 
 	m, _ = press(t, m, "/")
@@ -353,8 +354,8 @@ func TestFilterIndicatorCountsPluginsNotMarketplaceHeaders(t *testing.T) {
 	m, _ = press(t, m, "enter")
 
 	view := m.View()
-	if !strings.Contains(view, "filter: mp (2/3)") {
-		t.Errorf("View() counted the marketplace header row as a match:\n%s", view)
+	if !strings.Contains(view, "filter: mp (3/5)") {
+		t.Errorf("View() miscounted the matched marketplace group:\n%s", view)
 	}
 }
 
@@ -699,6 +700,11 @@ func TestFilterMatchingOnlyMarketplaceHeader(t *testing.T) {
 		if strings.Contains(view, gone) {
 			t.Errorf("View() still shows the non-matching plugin %q:\n%s", gone, view)
 		}
+	}
+	// The kept header is a result — reporting no matches beside a rendered,
+	// actionable row would read as a broken filter.
+	if !strings.Contains(view, "filter: sol (1/") {
+		t.Errorf("View() did not count the plugin-less marketplace as a match:\n%s", view)
 	}
 
 	m, _ = press(t, m, "d")
