@@ -331,13 +331,30 @@ func TestFilterIndicatorShownWhileInputClosed(t *testing.T) {
 	m = typeKeys(t, m, "b", "e")
 	m, _ = press(t, m, "enter")
 
-	// Rows: mp, alpha, beta, other, gamma — "be" keeps the mp header and beta.
+	// Plugins: alpha, beta, gamma — "be" matches beta alone. The mp header row
+	// the filter keeps alongside it is not a match and must not be counted.
 	view := m.View()
-	if !strings.Contains(view, "filter: be (2/5)") {
+	if !strings.Contains(view, "filter: be (1/3)") {
 		t.Errorf("View() lacks the query and match count:\n%s", view)
 	}
 	if !strings.Contains(view, "esc: clear") {
 		t.Errorf("View() does not say how to clear the filter:\n%s", view)
+	}
+}
+
+// A marketplace-name match keeps the group whole, so every plugin under it is
+// a match — but the header row it kept them under is still not one.
+func TestFilterIndicatorCountsPluginsNotMarketplaceHeaders(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	// "mp" matches no plugin name, only the marketplace holding alpha and beta.
+	m = typeKeys(t, m, "m", "p")
+	m, _ = press(t, m, "enter")
+
+	view := m.View()
+	if !strings.Contains(view, "filter: mp (2/3)") {
+		t.Errorf("View() counted the marketplace header row as a match:\n%s", view)
 	}
 }
 

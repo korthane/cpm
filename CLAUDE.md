@@ -105,6 +105,12 @@ behavior.
   consequences: a filter forces the fold map to `nil` (`activeFolds`), because
   a folded group would otherwise hide matches, and the indicator's match-count
   denominator must come from the *unfiltered* `allPluginGroups`/`allMCPRows`.
+  Both sides of that count are plugins (`countPlugins`), not rows: the plugins
+  tab emits a row per marketplace header, and a header kept because its group
+  holds a match is not itself a match — counting rows would report `(2/5)`
+  where one plugin of three matched. The no-match empty state still gates on
+  the *row* total, so a profile with marketplaces but no plugins installed
+  still has rows for the query to exclude.
   Matching is `sahilm/fuzzy`'s order-preserving `FindNoSort` — plain `Find`
   sorts by score and would re-rank rows under a grouped table. The query is
   trimmed (`model.NormalizeQuery`, `internal/model/filter.go`): fuzzy treats a
