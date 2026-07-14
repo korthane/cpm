@@ -659,7 +659,12 @@ func (m Model) closeFilter(query string) Model {
 // setQuery applies query to the active tab, sending the selection back to the
 // top: a new query rebuilds the row set, so the old row index addresses an
 // unrelated row (and the views' clamping would silently land on the last one).
+// The query is stored normalized, because everything else keys "is a filter
+// active" off it being non-empty: a whitespace-only query is empty to the
+// filters but would otherwise count as active here, disabling folding and
+// spending a chrome line on an indicator for a filter that hides nothing.
 func (m *Model) setQuery(query string) {
+	query = model.NormalizeQuery(query)
 	if m.filters[m.tab] == query {
 		return
 	}

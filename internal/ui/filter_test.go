@@ -704,6 +704,51 @@ func TestFilterQueryIsLiteralText(t *testing.T) {
 	}
 }
 
+// TestWhitespaceOnlyQueryIsNoFilter: the filters trim the query before matching,
+// so a query of spaces hides nothing. It must not count as an active filter
+// either, or it would suspend folding and spend a chrome line on an indicator
+// for a filter with no effect — with no visible cause, since the query prints as
+// empty text.
+func TestWhitespaceOnlyQueryIsNoFilter(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "enter") // fold "mp" before any filter exists
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "space")
+	m, _ = press(t, m, "enter")
+
+	if got := m.filters[tabPlugins]; got != "" {
+		t.Errorf("filters[tabPlugins] = %q for a whitespace-only query, want %q", got, "")
+	}
+	if m.filterVisible() {
+		t.Error("a whitespace-only query renders the filter line, want it treated as no filter")
+	}
+	view := m.View()
+	if strings.Contains(view, "alpha") {
+		t.Errorf("a whitespace-only query suspended the fold it does not narrow:\n%s", view)
+	}
+	if !strings.Contains(view, "enter: fold") {
+		t.Errorf("help dropped the fold key under a whitespace-only query:\n%s", view)
+	}
+}
+
+// TestFilterQueryStoredTrimmed: a trailing space is dropped on the way in, so
+// the indicator shows the query that is actually being matched.
+func TestFilterQueryStoredTrimmed(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "a", "l", "space")
+	m, _ = press(t, m, "enter")
+
+	if got := m.filters[tabPlugins]; got != "al" {
+		t.Errorf("filters[tabPlugins] = %q, want %q", got, "al")
+	}
+	if view := m.View(); !strings.Contains(view, "alpha") {
+		t.Errorf("a trailing space emptied the table:\n%s", view)
+	}
+}
+
 func TestFilterInputDoesNotBlockConfirmPrompt(t *testing.T) {
 	runner := okRunner()
 	m := modelWithCells(t, runner, installedFoo(true))

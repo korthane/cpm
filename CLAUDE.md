@@ -107,9 +107,14 @@ behavior.
   denominator must come from the *unfiltered* `allPluginGroups`/`allMCPRows`.
   Matching is `sahilm/fuzzy`'s order-preserving `FindNoSort` — plain `Find`
   sorts by score and would re-rank rows under a grouped table. The query is
-  trimmed first (`normalizeQuery`, `internal/model/filter.go`): fuzzy treats a
+  trimmed (`model.NormalizeQuery`, `internal/model/filter.go`): fuzzy treats a
   space as a literal rune to find, and no name contains one, so an accidental
-  trailing space would empty the table and read as an over-narrow filter.
+  trailing space would empty the table and read as an over-narrow filter. The
+  UI stores the query already normalized (`setQuery`), not just matching on the
+  normalized form: every "is a filter active" test keys off the stored query
+  being non-empty, so a whitespace-only query would otherwise be active to the
+  UI and empty to the filters — suspending folds and drawing an indicator for a
+  filter that hides nothing.
 - Because `activeFolds` is `nil` under a filter, `toggleFold` is a no-op there
   (and the help line drops `enter: fold`): a fold recorded while filtering
   would be invisible until the filter is cleared, and would then swallow rows

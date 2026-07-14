@@ -12,10 +12,13 @@ func nameMatches(query, name string) bool {
 	return len(fuzzy.FindNoSort(query, []string{name})) > 0
 }
 
-// normalizeQuery trims surrounding whitespace: fuzzy matching treats a space as
+// NormalizeQuery trims surrounding whitespace: fuzzy matching treats a space as
 // a literal rune to find, and no plugin, marketplace or MCP server name contains
-// one, so a stray leading or trailing space would silently match nothing.
-func normalizeQuery(query string) string {
+// one, so a stray leading or trailing space would silently match nothing. It is
+// exported so a caller storing a query can hold the same form the filters match
+// on: a query that is whitespace-only here but non-empty to the caller would
+// read as an active filter that filters nothing.
+func NormalizeQuery(query string) string {
 	return strings.TrimSpace(query)
 }
 
@@ -26,7 +29,7 @@ func normalizeQuery(query string) string {
 // and then only with the matching plugins. An empty or whitespace-only query
 // returns groups unchanged.
 func FilterPluginGroups(groups []PluginGroup, query string) []PluginGroup {
-	query = normalizeQuery(query)
+	query = NormalizeQuery(query)
 	if query == "" {
 		return groups
 	}
@@ -53,7 +56,7 @@ func FilterPluginGroups(groups []PluginGroup, query string) []PluginGroup {
 // FilterMCPRows narrows rows to those whose server name matches query, keeping
 // the input order. An empty or whitespace-only query returns rows unchanged.
 func FilterMCPRows(rows []MCPRow, query string) []MCPRow {
-	query = normalizeQuery(query)
+	query = NormalizeQuery(query)
 	if query == "" {
 		return rows
 	}
