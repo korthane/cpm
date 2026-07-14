@@ -141,21 +141,27 @@ behavior.
   (`PluginGroup.HiddenPlugins`) and the header renders it as `(+N hidden)`,
   the filter's analog of the count a folded header shows. A marketplace-name
   match keeps its group whole, so it hides nothing and the marker is absent.
-- The `no plugins match` / `no MCP servers match` empty state is gated on the
-  *unfiltered* row set being non-empty **and** on every column having loaded
-  (`allLoaded`). Loading and errored columns are skipped by
-  `allPluginGroups`/`allMCPRows`, so they produce zero rows too — blaming that
-  on the query would replace the table (and with it the per-column spinners and
-  `error:` lines) with a false "no matches". The row-set check alone is not
-  enough: with one column loaded and another still loading or errored, the
-  total is non-zero, so a no-match query would hide the other column's spinner
-  and its `error:` line for as long as the filter is applied.
-  The indicator's `(match/total)` counts are gated on the same `allLoaded` for
-  the same reason: they are built from the loaded columns only, so mid-reload
-  both sides are zero and `filter: gam (0/0)` would tell the user their query
-  matched nothing over a table of spinners — the no-match line's lie, moved one
-  line up. `filterLine` drops the parenthetical until the columns are whole,
-  keeping the query and `esc: clear` visible so the filter is never silent.
+- The `no plugins match` / `no MCP servers match` empty state (`noMatchLine`) is
+  gated on the *unfiltered* row set being non-empty **and** on no column still
+  *loading* (`tabLoading`, not the spinner-scoped `anyLoading`). Loading columns
+  are skipped by `allPluginGroups`/`allMCPRows`, so they produce zero rows too —
+  blaming that on the query would report "no matches" over a table of spinners.
+  The row-set check alone is not enough: with one column loaded and another
+  still loading, the total is non-zero, so a no-match query would claim the
+  filter emptied a table that is merely not filled in yet.
+  The gate is on *loading*, not on `statusLoaded` for every column: an errored
+  column contributes no rows either, but its state is settled, and waiting on it
+  would suppress the empty state and the counts until that profile loads — which
+  it may never do, leaving an over-narrow query to render as a silent empty
+  table for good. So the line is drawn *below* the table instead of in place of
+  it: the table carries the per-column spinners and `error:` lines, which an
+  errored profile still needs while its rows are gone. It costs no body row —
+  it only ever appears when the filtered row count is zero. The indicator's
+  `(match/total)` counts share the same gate: built from the loaded columns
+  only, mid-reload both sides are zero and `filter: gam (0/0)` would tell the
+  user their query matched nothing over a table of spinners. `filterLine` drops
+  the parenthetical until no column is loading, keeping the query and
+  `esc: clear` visible so the filter is never silent.
 - `rowWindow` (`internal/ui/app.go`) sizes the scroll window as
   `height - chromeLines()`, where `chromeLines` is the count of non-body lines.
   It is not a constant: the filter line adds one, and focusing the filter input

@@ -376,8 +376,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Without a width the input never scrolls (bubbles disables its overflow
 		// window at Width <= 0), so a query longer than the line renders in full
 		// and fitWidth chops off the tail — including the cursor. Leave a cell
-		// for the cursor past the value.
-		m.filterInput.Width = max(0, m.width-lipgloss.Width(filterPrompt)-1)
+		// for the cursor past the value, and never clamp to 0: a terminal too
+		// narrow for the prompt would otherwise turn scrolling back off.
+		m.filterInput.Width = max(1, m.width-lipgloss.Width(filterPrompt)-1)
 		return m, nil
 
 	case profileLoadedMsg:
@@ -747,9 +748,21 @@ func (m Model) filterVisible() bool {
 	return m.filterEditing || m.filters[m.tab] != ""
 }
 
-// noMatchLine replaces the table when the query matches nothing, so an active
-// filter is never mistaken for an empty profile.
-func (m Model) noMatchLine(kind string) string {
+// noMatchLine follows the table when the query matched nothing, so an active
+// filter is never mistaken for an empty profile. It is drawn below the table
+// rather than in place of it: the table carries the per-column spinners and
+// `error:` lines, which an errored profile needs even while its rows are gone.
+//
+// visible is the filtered row count, total the unfiltered one, and settled
+// reports that no column is still loading. Only an empty row set drawn from a
+// non-empty one, over columns that are done loading, can mean "the query
+// excluded everything" — while a column loads its rows are merely not in yet.
+// The gate counts rows, not plugins: a profile with marketplaces but no plugins
+// installed still has rows for the query to exclude.
+func (m Model) noMatchLine(kind string, visible, total int, settled bool) string {
+	if visible > 0 || total == 0 || m.filters[m.tab] == "" || !settled {
+		return ""
+	}
 	text := fmt.Sprintf("no %s match %q", kind, m.filters[m.tab])
 	return statusStyle.Render(m.fitWidth(text)) + "\n"
 }
@@ -1245,22 +1258,24 @@ func (m Model) pluginGroups() ([]model.PluginGroup, bool) {
 	return model.FilterPluginGroups(groups, m.filters[tabPlugins]), stale
 }
 
-// allLoaded reports whether every column has finished loading the tab's data.
-// The no-match empty state is gated on it: a column that is still loading or
-// has errored contributes no rows, so with any other column loaded the query
-// looks like the reason the table is empty when it is not, and replacing the
-// table would hide that column's spinner or error line.
-func (m Model) allLoaded(t tab) bool {
+// tabLoading reports whether a column is still loading the tab's data. The
+// no-match empty state and the indicator's counts are gated on it: a loading
+// column contributes no rows, so with any other column loaded the query would
+// be blamed for a table that is merely not filled in yet. An errored column
+// contributes no rows either, but it is settled, not transient — waiting on it
+// would suppress the empty state and the counts until the profile loads, which
+// it may never do.
+func (m Model) tabLoading(t tab) bool {
 	for i := range m.columns {
 		st := m.columns[i].status
 		if t == tabMCP {
 			st = m.columns[i].mcpStatus
 		}
-		if st != statusLoaded {
-			return false
+		if st == statusLoading {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // activeFolds is the fold map in effect for the current render: none while a
@@ -1287,22 +1302,12 @@ func (m Model) viewPlugins() string {
 	// the filter keeps only to hold a matching plugin is not itself a match, so
 	// counting rows would inflate both numbers. Folds are ignored too, so the
 	// count does not move when a group is folded.
-	loaded := m.allLoaded(tabPlugins)
+	settled := !m.tabLoading(tabPlugins)
 	line := m.filterLine(
 		model.CountPluginMatches(all, m.filters[tabPlugins]),
 		model.CountPluginEntries(all),
-		loaded,
+		settled,
 	)
-	// Only an empty set of rows drawn from fully loaded columns can mean "the
-	// query excluded everything". Rows are also absent while a column loads or
-	// after it errors, and there the table must still render its spinner and
-	// error line. The gate counts rows, not plugins: a profile with
-	// marketplaces but no plugins installed still has rows for the query to
-	// exclude.
-	if len(refs) == 0 && len(visibleRefs(all, nil)) > 0 &&
-		m.filters[tabPlugins] != "" && loaded {
-		return line + m.noMatchLine("plugins")
-	}
 	selRow := max(0, min(m.selRow, len(refs)-1))
 	start, end := m.rowWindow(len(refs))
 
@@ -1319,7 +1324,8 @@ func (m Model) viewPlugins() string {
 		}
 		table.profiles[i] = m.columns[i].groupColumn(i, groups, refs[start:end], rowSel, m.spinner.View())
 	}
-	return line + table.render() + m.overflowLine(start, end, len(refs))
+	return line + table.render() + m.overflowLine(start, end, len(refs)) +
+		m.noMatchLine("plugins", len(refs), len(visibleRefs(all, nil)), settled)
 }
 
 // allMCPRows builds the MCP comparison matrix from the currently loaded
@@ -1356,12 +1362,8 @@ func (m Model) rowCount() int {
 func (m Model) viewMCP() string {
 	all := m.allMCPRows()
 	rows := model.FilterMCPRows(all, m.filters[tabMCP])
-	loaded := m.allLoaded(tabMCP)
-	line := m.filterLine(len(rows), len(all), loaded)
-	// See viewPlugins: loading and errored columns produce no rows either.
-	if len(rows) == 0 && len(all) > 0 && m.filters[tabMCP] != "" && loaded {
-		return line + m.noMatchLine("MCP servers")
-	}
+	settled := !m.tabLoading(tabMCP)
+	line := m.filterLine(len(rows), len(all), settled)
 	selRow := max(0, min(m.selRow, len(rows)-1))
 	start, end := m.rowWindow(len(rows))
 
@@ -1378,7 +1380,8 @@ func (m Model) viewMCP() string {
 		}
 		table.profiles[i] = m.columns[i].mcpColumn(i, rows[start:end], rowSel, m.spinner.View())
 	}
-	return line + table.render() + m.overflowLine(start, end, len(rows))
+	return line + table.render() + m.overflowLine(start, end, len(rows)) +
+		m.noMatchLine("MCP servers", len(rows), len(all), settled)
 }
 
 // rowWindow bounds the matrix rows rendered so the table fits the terminal

@@ -631,6 +631,57 @@ func TestNoMatchLineKeepsUnloadedColumnVisible(t *testing.T) {
 	}
 }
 
+// TestNoMatchLineWithErroredColumn pins the empty state against a settled
+// error. An errored column never loads, so gating the no-match line and the
+// counts on "every column loaded" would suppress both forever: the query would
+// silently render as an empty table — the very "reads as an empty profile"
+// confusion the filter line exists to prevent. The column's error line has to
+// survive alongside them, which is why the line follows the table.
+func TestNoMatchLineWithErroredColumn(t *testing.T) {
+	m := halfLoadedModel(t, multiPlugins())
+	errored, _ := m.Update(profileErrMsg{index: 1, gen: m.columns[1].gen, err: errors.New("boom")})
+	m = errored.(Model)
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "z", "z", "z")
+	m, _ = press(t, m, "enter")
+
+	view := m.View()
+	if !strings.Contains(view, `no plugins match "zzz"`) {
+		t.Errorf("no-match line suppressed by a settled errored column:\n%s", view)
+	}
+	if !strings.Contains(view, "filter: zzz (0/5)") {
+		t.Errorf("match counts suppressed by a settled errored column:\n%s", view)
+	}
+	if !strings.Contains(view, "boom") {
+		t.Errorf("the no-match line hid the errored column's error:\n%s", view)
+	}
+}
+
+// TestMCPNoMatchLineWithErroredColumn is TestNoMatchLineWithErroredColumn for
+// the MCP tab, whose empty state shares the gate.
+func TestMCPNoMatchLineWithErroredColumn(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins(), multiPlugins())
+	m, _ = switchToMCP(t, m)
+	loaded, _ := m.Update(mcpLoadedMsg{index: 0, gen: m.columns[0].mcpGen,
+		servers: []claudecli.MCPServer{{Name: "exa"}, {Name: "github"}}})
+	m = loaded.(Model)
+	errored, _ := m.Update(mcpErrMsg{index: 1, gen: m.columns[1].mcpGen, err: errors.New("boom")})
+	m = errored.(Model)
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "z", "z", "z")
+	m, _ = press(t, m, "enter")
+
+	view := m.View()
+	if !strings.Contains(view, `no MCP servers match "zzz"`) {
+		t.Errorf("MCP no-match line suppressed by a settled errored column:\n%s", view)
+	}
+	if !strings.Contains(view, "boom") {
+		t.Errorf("the MCP no-match line hid the errored column's error:\n%s", view)
+	}
+}
+
 // TestFoldKeyIgnoredWhileFiltering pins the fold no-op: activeFolds is nil
 // under a filter, so a fold recorded now would be invisible until the filter
 // is cleared and would then hide rows the user never folded.
