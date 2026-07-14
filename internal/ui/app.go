@@ -549,7 +549,7 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		return m.openFilter(), nil
 	case "esc":
-		m.filters[m.tab] = ""
+		m.setQuery("")
 		return m, nil
 	// enterTab mutates scalar Model fields through a pointer receiver, so it
 	// must run before the return operand copies m: the Go spec leaves the
@@ -604,7 +604,7 @@ func (m Model) toggleFold() Model {
 		return m
 	}
 	groups, _ := m.pluginGroups()
-	refs := visibleRefs(groups, m.folded)
+	refs := m.visiblePluginRefs(groups)
 	if len(refs) == 0 {
 		return m
 	}
@@ -649,8 +649,19 @@ func (m Model) openFilter() Model {
 func (m Model) closeFilter(query string) Model {
 	m.filterEditing = false
 	m.filterInput.Blur()
-	m.filters[m.tab] = query
+	m.setQuery(query)
 	return m
+}
+
+// setQuery applies query to the active tab, sending the selection back to the
+// top: a new query rebuilds the row set, so the old row index addresses an
+// unrelated row (and the views' clamping would silently land on the last one).
+func (m *Model) setQuery(query string) {
+	if m.filters[m.tab] == query {
+		return
+	}
+	m.filters[m.tab] = query
+	m.selRow = 0
 }
 
 // handleFilterKey routes keys while the filter input is focused: enter applies
@@ -671,7 +682,7 @@ func (m Model) handleFilterKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.filterInput, cmd = m.filterInput.Update(key)
-	m.filters[m.tab] = m.filterInput.Value()
+	m.setQuery(m.filterInput.Value())
 	return m, cmd
 }
 
@@ -724,7 +735,7 @@ var actionVerbs = map[string]string{
 func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 	verb := actionVerbs[key]
 	groups, _ := m.pluginGroups()
-	refs := visibleRefs(groups, m.folded)
+	refs := m.visiblePluginRefs(groups)
 	if len(refs) == 0 {
 		return m, nil
 	}
@@ -1100,7 +1111,7 @@ func (m Model) View() string {
 // marketplace header row; the second footer help line follows the row kind.
 func (m Model) selectedMarketplaceRow() bool {
 	groups, _ := m.pluginGroups()
-	refs := visibleRefs(groups, m.folded)
+	refs := m.visiblePluginRefs(groups)
 	if len(refs) == 0 {
 		return false
 	}
@@ -1153,18 +1164,35 @@ func (m Model) pluginGroups() ([]model.PluginGroup, bool) {
 		perLatest[i] = m.columns[i].latest
 	}
 	latest, stale := model.MergeLatestVersions(perLatest)
-	return model.BuildPluginGroups(perProfile, latest), stale
+	groups := model.BuildPluginGroups(perProfile, latest)
+	return model.FilterPluginGroups(groups, m.filters[tabPlugins]), stale
+}
+
+// activeFolds is the fold map in effect for the current render: none while a
+// filter is active, since a folded group would hide matching rows. The fold
+// state itself is kept, so clearing the filter restores it.
+func (m Model) activeFolds() map[string]bool {
+	if m.filters[tabPlugins] != "" {
+		return nil
+	}
+	return m.folded
+}
+
+// visiblePluginRefs is the single choke point for plugins-tab row visibility:
+// the filtered groups, flattened in render order under the active folds.
+func (m Model) visiblePluginRefs(groups []model.PluginGroup) []rowRef {
+	return visibleRefs(groups, m.activeFolds())
 }
 
 func (m Model) viewPlugins() string {
 	groups, stale := m.pluginGroups()
-	refs := visibleRefs(groups, m.folded)
+	refs := m.visiblePluginRefs(groups)
 	selRow := max(0, min(m.selRow, len(refs)-1))
 	start, end := m.rowWindow(len(refs))
 
 	table := comparisonTable{
 		profiles: make([]tableColumn, len(m.columns)),
-		pinned:   pinnedGroupColumn(groups, refs, start, end, selRow-start, stale, m.folded),
+		pinned:   pinnedGroupColumn(groups, refs, start, end, selRow-start, stale, m.activeFolds()),
 		sel:      m.selCol,
 		width:    m.width,
 	}
@@ -1199,7 +1227,7 @@ func (m Model) rowCount() int {
 		return len(m.mcpRows())
 	}
 	groups, _ := m.pluginGroups()
-	return len(visibleRefs(groups, m.folded))
+	return len(m.visiblePluginRefs(groups))
 }
 
 func (m Model) viewMCP() string {

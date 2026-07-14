@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/korthane/cpm/internal/claudecli"
 )
 
 // quits reports whether cmd produces a quit message.
@@ -25,6 +28,21 @@ func typeKeys(t *testing.T, m Model, keys ...string) Model {
 		m, _ = press(t, m, k)
 	}
 	return m
+}
+
+// multiPlugins spreads three plugins over two marketplaces, so a filter can
+// narrow rows both within a group (mp: alpha, beta) and across groups.
+func multiPlugins() claudecli.PluginData {
+	plugin := func(name, mkt string) claudecli.InstalledPlugin {
+		return claudecli.InstalledPlugin{
+			ID:      claudecli.PluginID{Name: name, Marketplace: mkt},
+			Version: "1.0.0",
+			Enabled: true,
+		}
+	}
+	return claudecli.PluginData{Installed: []claudecli.InstalledPlugin{
+		plugin("alpha", "mp"), plugin("beta", "mp"), plugin("gamma", "other"),
+	}}
 }
 
 func TestSlashOpensFilterInput(t *testing.T) {
@@ -172,6 +190,105 @@ func TestFilterTabClosesInputKeepingQuery(t *testing.T) {
 	}
 	if got := m.filters[tabPlugins]; got != "fo" {
 		t.Errorf("filters[tabPlugins] = %q after tab, want %q kept", got, "fo")
+	}
+}
+
+func TestFilterNarrowsVisibleRows(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "g", "a", "m")
+
+	view := m.View()
+	if !strings.Contains(view, "gamma") {
+		t.Errorf("View() drops the matching row:\n%s", view)
+	}
+	for _, gone := range []string{"alpha", "beta"} {
+		if strings.Contains(view, gone) {
+			t.Errorf("View() still shows the non-matching row %q:\n%s", gone, view)
+		}
+	}
+}
+
+func TestFilterUnfoldsFoldedGroup(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	// Row 0 is the mp group header; enter folds it.
+	m, _ = press(t, m, "enter")
+	if strings.Contains(m.View(), "alpha") {
+		t.Fatalf("fold left the plugin rows visible:\n%s", m.View())
+	}
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "a", "l")
+	if !strings.Contains(m.View(), "alpha") {
+		t.Errorf("a folded group hid a matching row:\n%s", m.View())
+	}
+
+	m, _ = press(t, m, "esc")
+	if strings.Contains(m.View(), "alpha") {
+		t.Errorf("fold not restored after the filter was cleared:\n%s", m.View())
+	}
+}
+
+func TestFilterResetsSelectionToTop(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	// Rows: mp, alpha, beta, other, gamma.
+	m = typeKeys(t, m, "j", "j", "j", "j")
+	if m.selRow != 4 {
+		t.Fatalf("selRow = %d before filtering, want the last row (4)", m.selRow)
+	}
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "a", "l")
+
+	if m.selRow != 0 {
+		t.Errorf("selRow = %d after the query changed, want 0", m.selRow)
+	}
+	if !strings.Contains(m.View(), "alpha") {
+		t.Errorf("View() drops the matching row:\n%s", m.View())
+	}
+}
+
+func TestNavigationFollowsFilteredRows(t *testing.T) {
+	forceANSI(t)
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "b", "e")
+	m, _ = press(t, m, "enter")
+
+	// Filtered rows: the mp header and beta — j lands on beta, and a second j
+	// has nowhere to go.
+	m, _ = press(t, m, "j")
+	assertHighlighted(t, m.View(), "beta")
+	m, _ = press(t, m, "j")
+	assertHighlighted(t, m.View(), "beta")
+}
+
+func TestActionOnFilteredRowTargetsSelectedPlugin(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := modelWithCells(t, runner, multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "b", "e")
+	m, _ = press(t, m, "enter")
+	m, _ = press(t, m, "j")
+
+	_, cmd := press(t, m, "d")
+	if cmd == nil {
+		t.Fatal("d on a filtered plugin row produced no command")
+	}
+	drain(t, cmd)
+
+	calls := pluginCalls(runner, "disable")
+	if len(calls) != 1 {
+		t.Fatalf("got %d disable calls, want 1 (all calls: %v)", len(calls), runner.Calls)
+	}
+	want := []string{"plugin", "disable", "--scope", "user", "beta@mp"}
+	if !slices.Equal(calls[0].Args, want) {
+		t.Errorf("args = %v, want %v", calls[0].Args, want)
 	}
 }
 

@@ -151,22 +151,24 @@ Dependencies identified:
 
 ### Task 3: Apply the filter to visible rows, folding, and selection
 
-- [ ] write tests FIRST — typing a query narrows the rows shown in `View()`;
+- [x] write tests FIRST — typing a query narrows the rows shown in `View()`;
       rows of a *folded* group whose plugins match are visible while filtering
       (auto-unfold) and the fold is restored once the filter is cleared; the
       selected row is reset to the top on a query change and never points past
       the end when the list shrinks; `j`/`k` after `enter` navigate only the
       filtered rows (assert with `forceANSI` + `reversedPinnedCells`, no
       `t.Parallel()`); an action key on a filtered row targets the right plugin
-- [ ] apply `model.FilterPluginGroups` inside `m.pluginGroups()` (app.go:1064)
+- [x] apply `model.FilterPluginGroups` inside `m.pluginGroups()` (app.go:1064)
       so every caller (`viewPlugins`, `rowCount`, `toggleFold`, `startAction`,
       `selectedMarketplaceRow`) sees the filtered set through one choke point
-- [ ] centralize row visibility in a `Model` method (e.g. `visiblePluginRefs()`)
+- [x] centralize row visibility in a `Model` method (e.g. `visiblePluginRefs()`)
       that passes a `nil` fold map to `visibleRefs` (rows.go:26) while a filter
       is active, and update the five call sites to use it
-- [ ] reset `m.selRow` to 0 whenever the query changes, and keep the existing
+      (➕ `pinnedGroupColumn` gets the same fold map via `activeFolds()`, so the
+      fold chevrons match the auto-unfolded rows)
+- [x] reset `m.selRow` to 0 whenever the query changes, and keep the existing
       clamping so a shrinking list can't strand the cursor
-- [ ] run `make test` and `make lint` — must pass before task 4
+- [x] run `make test` and `make lint` — must pass before task 4
 
 ### Task 4: Render the filter line, empty state, and layout
 
