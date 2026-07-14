@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/korthane/cpm/internal/claudecli"
@@ -28,18 +29,6 @@ func shape(groups []model.PluginGroup) []string {
 		}
 	}
 	return out
-}
-
-func equal(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestFilterPluginGroups(t *testing.T) {
@@ -113,7 +102,7 @@ func TestFilterPluginGroups(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := shape(model.FilterPluginGroups(groups, tt.query))
-			if !equal(got, tt.want) {
+			if !slices.Equal(got, tt.want) {
 				t.Errorf("FilterPluginGroups(%q) = %v, want %v", tt.query, got, tt.want)
 			}
 		})
@@ -127,7 +116,7 @@ func TestFilterPluginGroupsDoesNotMutateInput(t *testing.T) {
 	model.FilterPluginGroups(groups, "foo")
 
 	want := []string{"alpha-market", "  foo-bar", "  zebra"}
-	if got := shape(groups); !equal(got, want) {
+	if got := shape(groups); !slices.Equal(got, want) {
 		t.Errorf("input mutated: %v, want %v", got, want)
 	}
 }
@@ -160,7 +149,7 @@ func TestFilterMCPRows(t *testing.T) {
 			for _, r := range model.FilterMCPRows(rows, tt.query) {
 				got = append(got, r.Name)
 			}
-			if !equal(got, tt.want) {
+			if !slices.Equal(got, tt.want) {
 				t.Errorf("FilterMCPRows(%q) = %v, want %v", tt.query, got, tt.want)
 			}
 		})

@@ -107,6 +107,16 @@ behavior.
   denominator must come from the *unfiltered* `allPluginGroups`/`allMCPRows`.
   Matching is `sahilm/fuzzy`'s order-preserving `FindNoSort` — plain `Find`
   sorts by score and would re-rank rows under a grouped table.
+- Because `activeFolds` is `nil` under a filter, `toggleFold` is a no-op there
+  (and the help line drops `enter: fold`): a fold recorded while filtering
+  would be invisible until the filter is cleared, and would then swallow rows
+  the user never folded.
+- The `no plugins match` / `no MCP servers match` empty state is gated on the
+  *unfiltered* row set being non-empty. Loading and errored columns are skipped
+  by `allPluginGroups`/`allMCPRows`, so they produce zero rows too — blaming
+  that on the query would replace the table (and with it the per-column
+  spinners and `error:` lines) with a false "no matches" whenever a filter is
+  applied across a reload.
 - `rowWindow` (`internal/ui/app.go`) sizes the scroll window as
   `height - chromeLines()`, where `chromeLines` is the count of non-body lines.
   It is not a constant: the filter line adds one, and focusing the filter input

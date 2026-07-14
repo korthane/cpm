@@ -67,6 +67,8 @@ func press(t *testing.T, m Model, key string) (Model, tea.Cmd) {
 		msg = tea.KeyMsg{Type: tea.KeyEsc}
 	case "space":
 		msg = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
+	case "backspace":
+		msg = tea.KeyMsg{Type: tea.KeyBackspace}
 	}
 	updated, cmd := m.Update(msg)
 	return updated.(Model), cmd

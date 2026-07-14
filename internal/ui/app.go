@@ -598,9 +598,12 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // toggleFold flips the fold state of the selected marketplace group. Plugin
 // rows and the MCP tab ignore the key; during a y/n confirmation the key
-// never reaches here (handleConfirmKey resolves it first).
+// never reaches here (handleConfirmKey resolves it first). An active filter
+// ignores it too: activeFolds is nil there, so a fold recorded now would be
+// invisible until the filter is cleared and would then swallow rows the user
+// never folded.
 func (m Model) toggleFold() Model {
-	if m.tab != tabPlugins {
+	if m.tab != tabPlugins || m.filters[tabPlugins] != "" {
 		return m
 	}
 	groups, _ := m.pluginGroups()
@@ -670,6 +673,10 @@ func (m *Model) setQuery(query string) {
 // still quits, and tab still switches tabs (closing the input, keeping the
 // query), because neither has a useful meaning as literal text.
 func (m Model) handleFilterKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// As in handleKey: the transient status is dismissed by the next key, so an
+	// action's result cannot linger under the input and read as a reply to what
+	// is being typed.
+	m.setStatus("", false)
 	switch key.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -1124,7 +1131,11 @@ func (m Model) View() string {
 	case m.tab == tabMCP:
 		b.WriteString("\nx: remove")
 	case m.selectedMarketplaceRow():
-		b.WriteString("\ni: add  u: update  x: remove  enter: fold")
+		b.WriteString("\ni: add  u: update  x: remove")
+		// Folding is disabled while a filter is applied (see toggleFold).
+		if m.filters[tabPlugins] == "" {
+			b.WriteString("  enter: fold")
+		}
 	default:
 		b.WriteString("\ne: enable  d: disable  u: update  x: uninstall  i: install")
 	}
@@ -1201,14 +1212,6 @@ func (m Model) pluginGroups() ([]model.PluginGroup, bool) {
 	return model.FilterPluginGroups(groups, m.filters[tabPlugins]), stale
 }
 
-// totalPluginRows is the unfiltered row count the filter indicator compares
-// against. Folds are ignored so the denominator does not move when a group is
-// folded.
-func (m Model) totalPluginRows() int {
-	groups, _ := m.allPluginGroups()
-	return len(visibleRefs(groups, nil))
-}
-
 // activeFolds is the fold map in effect for the current render: none while a
 // filter is active, since a folded group would hide matching rows. The fold
 // state itself is kept, so clearing the filter restores it.
@@ -1226,10 +1229,17 @@ func (m Model) visiblePluginRefs(groups []model.PluginGroup) []rowRef {
 }
 
 func (m Model) viewPlugins() string {
-	groups, stale := m.pluginGroups()
+	all, stale := m.allPluginGroups()
+	groups := model.FilterPluginGroups(all, m.filters[tabPlugins])
 	refs := m.visiblePluginRefs(groups)
-	line := m.filterLine(len(refs), m.totalPluginRows())
-	if len(refs) == 0 && m.filters[tabPlugins] != "" {
+	// Folds are ignored in the denominator so it does not move when a group is
+	// folded.
+	total := len(visibleRefs(all, nil))
+	line := m.filterLine(len(refs), total)
+	// Only an empty *unfiltered* set can mean "the query excluded everything".
+	// Rows are also absent while the columns load or after they error, and
+	// there the table must still render its spinners and error lines.
+	if len(refs) == 0 && total > 0 && m.filters[tabPlugins] != "" {
 		return line + m.noMatchLine("plugins")
 	}
 	selRow := max(0, min(m.selRow, len(refs)-1))
@@ -1283,9 +1293,11 @@ func (m Model) rowCount() int {
 }
 
 func (m Model) viewMCP() string {
-	rows := m.mcpRows()
-	line := m.filterLine(len(rows), len(m.allMCPRows()))
-	if len(rows) == 0 && m.filters[tabMCP] != "" {
+	all := m.allMCPRows()
+	rows := model.FilterMCPRows(all, m.filters[tabMCP])
+	line := m.filterLine(len(rows), len(all))
+	// See viewPlugins: loading and errored columns produce no rows either.
+	if len(rows) == 0 && len(all) > 0 && m.filters[tabMCP] != "" {
 		return line + m.noMatchLine("MCP servers")
 	}
 	selRow := max(0, min(m.selRow, len(rows)-1))

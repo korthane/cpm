@@ -132,6 +132,7 @@ kicks in); malformed YAML or an unknown key (e.g. `profile:` instead of
 | `↑` / `↓` / `j` / `k` | select row (tall tables scroll to keep it visible) |
 | `tab` / `shift+tab` | cycle between the Plugins and MCP tabs |
 | `/` | filter rows by name (see below) |
+| `esc` | clear the active name filter |
 | `r` | reload the active tab's data |
 | `q` / `ctrl+c` | quit |
 
@@ -149,17 +150,23 @@ marketplace keeps its whole group, a marketplace with no matching plugins and a
 non-matching name drops out. Rows keep their marketplace grouping and
 alphabetical order; the filter never re-ranks them. Folded groups unfold while a
 filter is active — otherwise a fold would hide matches — and their fold state
-comes back once the filter is cleared.
+comes back once the filter is cleared; `enter` does not fold while filtering.
+Changing the query moves the selection back to the first matching row. A query
+that matches nothing replaces the table with `no plugins match "…"` (or
+`no MCP servers match "…"`), so an over-narrow filter never reads as an empty
+profile.
 
 `enter` closes the input but keeps the filter applied, so navigation and action
 keys operate on the visible subset. `esc` clears the filter and restores the
 full list, both from inside the input and while navigating an already-filtered
 list. While the input is focused every rune goes into it: `q` does not quit and
 `e`/`d`/`u`/`x`/`i` do not fire actions, and the help line shows only the keys
-that work in that mode. With the input closed and a filter still applied, an
-indicator above the table shows the query and the match count, so an active
-filter is never invisible. Each tab keeps its own query, so switching tabs does
-not disturb the other's filter.
+that work in that mode. Only `ctrl+c` (quit) and `tab`/`shift+tab` (which close
+the input, keep the query, and switch tabs) still act, since neither is useful
+as literal text. With the input closed and a filter still applied, an indicator
+above the table shows the query and the match count, so an active filter is
+never invisible. Each tab keeps its own query, so switching tabs does not
+disturb the other's filter.
 
 Plugins tab, on a plugin row, applied to the selected cell:
 

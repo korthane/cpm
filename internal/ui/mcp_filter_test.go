@@ -120,6 +120,59 @@ func TestMCPFilterIndicatorAndEmptyState(t *testing.T) {
 	}
 }
 
+// TestMCPNavigationFollowsFilteredRows pins the row bound to the *filtered*
+// list: navigating past its end must not park the selection on a hidden row,
+// where the next remove would target a server the user cannot see.
+func TestMCPNavigationFollowsFilteredRows(t *testing.T) {
+	runner := &claudecli.FakeRunner{}
+	m := filterModelBothTabs(t, runner)
+
+	// "e" matches exa and linear, but not github.
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "e")
+	m, _ = press(t, m, "enter")
+
+	m = typeKeys(t, m, "j", "j", "j")
+	if m.selRow != 1 {
+		t.Fatalf("selRow = %d after walking off the end of 2 filtered rows, want 1", m.selRow)
+	}
+
+	m, _ = press(t, m, "x")
+	_, cmd := press(t, m, "y")
+	if cmd == nil {
+		t.Fatal("confirmed remove on the last filtered row produced no command")
+	}
+	drain(t, cmd)
+
+	calls := mcpRemoveCalls(runner)
+	if len(calls) != 1 {
+		t.Fatalf("got %d remove calls, want 1 (all calls: %v)", len(calls), runner.Calls)
+	}
+	want := []string{"mcp", "remove", "--scope", "user", "linear"}
+	if !slices.Equal(calls[0].Args, want) {
+		t.Errorf("args = %v, want %v", calls[0].Args, want)
+	}
+}
+
+// TestMCPEscClearsAppliedFilter mirrors the plugins tab: esc with the input
+// closed drops the query and brings the full list back.
+func TestMCPEscClearsAppliedFilter(t *testing.T) {
+	m := filterModelBothTabs(t, okRunner())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "e", "x")
+	m, _ = press(t, m, "enter")
+
+	m, _ = press(t, m, "esc")
+
+	if got := m.filters[tabMCP]; got != "" {
+		t.Errorf("filters[tabMCP] = %q after esc, want it cleared", got)
+	}
+	if view := m.View(); !strings.Contains(view, "github") {
+		t.Errorf("esc did not restore the full MCP list:\n%s", view)
+	}
+}
+
 func TestMCPRemoveOnFilteredRowTargetsSelectedServer(t *testing.T) {
 	runner := &claudecli.FakeRunner{}
 	m := filterModelBothTabs(t, runner)

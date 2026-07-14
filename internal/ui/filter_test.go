@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -91,6 +92,9 @@ func TestFilterInputSwallowsActionKeys(t *testing.T) {
 	runner := okRunner()
 	m := modelWithCells(t, runner, installedFoo(true))
 
+	// Row 0 is the marketplace header, where `d` is a no-op even unfiltered:
+	// move onto the plugin row so a leaked key would really fire an action.
+	m, _ = press(t, m, "j")
 	m, _ = press(t, m, "/")
 	m, _ = press(t, m, "d")
 
@@ -391,6 +395,13 @@ func TestFilterLineShrinksRowWindow(t *testing.T) {
 	if view := m.View(); !strings.Contains(view, "… rows 1–4 of 21") {
 		t.Errorf("filter line did not shrink the row window to 4:\n%s", view)
 	}
+
+	// Focusing the input suppresses the action help line, which gives the row
+	// back: the filter line and that line cancel out.
+	m, _ = press(t, m, "/")
+	if view := m.View(); !strings.Contains(view, "… rows 1–5 of 21") {
+		t.Errorf("focused input did not give the suppressed help line back to the window:\n%s", view)
+	}
 }
 
 func TestHelpAdvertisesFilterKey(t *testing.T) {
@@ -479,13 +490,131 @@ func TestFilterOnZeroLoadedColumns(t *testing.T) {
 	m = typeKeys(t, m, "a")
 	m, _ = press(t, m, "enter")
 
-	if view := m.View(); !strings.Contains(view, `no plugins match "a"`) {
-		t.Errorf("View() lacks the empty-result line with no columns loaded:\n%s", view)
+	// No rows exist to match, so the query is not what emptied the list: the
+	// no-match line would blame the filter for it.
+	if view := m.View(); strings.Contains(view, `no plugins match`) {
+		t.Errorf("no-match line shown with nothing loaded to match:\n%s", view)
 	}
 	// The action would index the empty group list if the filter left it stale.
 	m, _ = press(t, m, "d")
 	if m.pending != nil {
 		t.Error("action key started on an empty filtered list, want it ignored")
+	}
+}
+
+// TestFilterKeepsLoadingAndErrorChromeVisible guards the empty-state gate: a
+// reloading or errored column has no rows either, and reporting that as "no
+// plugins match" would hide the spinner and swallow the load error.
+func TestFilterKeepsLoadingAndErrorChromeVisible(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "g", "a", "m")
+	m, _ = press(t, m, "enter")
+	m, _ = press(t, m, "r")
+
+	view := m.View()
+	if strings.Contains(view, `no plugins match`) {
+		t.Errorf("reload under a filter reported the rows as filtered out:\n%s", view)
+	}
+	if !strings.Contains(view, "loading") {
+		t.Errorf("reload under a filter hid the loading state:\n%s", view)
+	}
+
+	errored, _ := m.Update(profileErrMsg{index: 0, gen: m.columns[0].gen, err: errors.New("boom")})
+	m = errored.(Model)
+
+	if view := m.View(); !strings.Contains(view, "boom") {
+		t.Errorf("a filter hid the column's load error:\n%s", view)
+	}
+}
+
+// TestFoldKeyIgnoredWhileFiltering pins the fold no-op: activeFolds is nil
+// under a filter, so a fold recorded now would be invisible until the filter
+// is cleared and would then hide rows the user never folded.
+func TestFoldKeyIgnoredWhileFiltering(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "a")
+	m, _ = press(t, m, "enter")
+
+	before := m.View()
+	m, _ = press(t, m, "enter") // on the "mp" marketplace header row
+	if after := m.View(); after != before {
+		t.Errorf("fold key changed the filtered view:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if m.folded["mp"] {
+		t.Error("fold key recorded a fold while filtering, want it ignored")
+	}
+
+	m, _ = press(t, m, "esc")
+	if view := m.View(); !strings.Contains(view, "alpha") {
+		t.Errorf("clearing the filter revealed a fold the user never made:\n%s", view)
+	}
+}
+
+// TestHelpDropsFoldKeyWhileFiltering: enter does not fold under a filter, so
+// the help line must not advertise it.
+func TestHelpDropsFoldKeyWhileFiltering(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	if view := m.View(); !strings.Contains(view, "enter: fold") {
+		t.Fatalf("unfiltered help lacks the fold key:\n%s", view)
+	}
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "a")
+	m, _ = press(t, m, "enter")
+
+	if view := m.View(); strings.Contains(view, "enter: fold") {
+		t.Errorf("help advertises fold while filtering, where it is a no-op:\n%s", view)
+	}
+}
+
+// TestFilterBackspaceToEmptyRestoresFolds walks the query back to empty, which
+// must restore both the full row set and the fold state the filter suspended.
+func TestFilterBackspaceToEmptyRestoresFolds(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "enter") // fold "mp" before any filter exists
+	if view := m.View(); strings.Contains(view, "alpha") {
+		t.Fatalf("fold did not hide the group's plugins:\n%s", view)
+	}
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "a", "l")
+	if view := m.View(); !strings.Contains(view, "alpha") {
+		t.Fatalf("filter did not unfold the group:\n%s", view)
+	}
+
+	m = typeKeys(t, m, "backspace", "backspace")
+
+	if got := m.filters[tabPlugins]; got != "" {
+		t.Errorf("filters[tabPlugins] = %q after backspacing to empty, want %q", got, "")
+	}
+	view := m.View()
+	if !strings.Contains(view, "gamma") {
+		t.Errorf("clearing the query did not restore the full list:\n%s", view)
+	}
+	if strings.Contains(view, "alpha") {
+		t.Errorf("clearing the query did not restore the suspended fold:\n%s", view)
+	}
+}
+
+// TestFilterStatusClearedByTyping: the transient status is dismissed by the
+// next key everywhere else, so it must not linger under the focused input and
+// read as a reply to what is being typed.
+func TestFilterStatusClearedByTyping(t *testing.T) {
+	m := modelWithCells(t, okRunner(), multiPlugins())
+
+	m, _ = press(t, m, "/")
+	// An async action result can land while the input is already focused.
+	m.setStatus("cannot disable alpha in p0", true)
+	m = typeKeys(t, m, "a")
+
+	if m.status != "" {
+		t.Errorf("status = %q while typing a filter, want it cleared", m.status)
 	}
 }
 
