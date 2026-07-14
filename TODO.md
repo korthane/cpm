@@ -5,3 +5,4 @@
 - [x] make j/k navigate rows
 - [x] make h/l navigate columns
 - [ ] not all plugins have versions. Why?
+- [ ] / key to filter by name
