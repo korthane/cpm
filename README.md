@@ -152,9 +152,10 @@ alphabetical order; the filter never re-ranks them. Folded groups unfold while a
 filter is active — otherwise a fold would hide matches — and their fold state
 comes back once the filter is cleared; `enter` does not fold while filtering.
 Changing the query moves the selection back to the first matching row. A query
-that matches nothing replaces the table with `no plugins match "…"` (or
-`no MCP servers match "…"`), so an over-narrow filter never reads as an empty
-profile.
+that matches nothing keeps the table and its column headers in place and adds a
+`no plugins match "…"` (or `no MCP servers match "…"`) line below it, so an
+over-narrow filter never reads as an empty profile while a still-loading or
+errored profile keeps its spinner or `error:` line.
 
 A marketplace header whose group the filter narrowed carries the count of what
 it is hiding (`mp (+2 hidden)`): the header's actions — `x` above all, which can
