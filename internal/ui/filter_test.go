@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/korthane/cpm/internal/claudecli"
+	"github.com/korthane/cpm/internal/config"
 )
 
 // quits reports whether cmd produces a quit message.
@@ -526,6 +527,48 @@ func TestFilterKeepsLoadingAndErrorChromeVisible(t *testing.T) {
 
 	if view := m.View(); !strings.Contains(view, "boom") {
 		t.Errorf("a filter hid the column's load error:\n%s", view)
+	}
+}
+
+// halfLoadedModel builds a two-profile model in which only p0 has loaded, so
+// p1 still renders a spinner and contributes no rows.
+func halfLoadedModel(t *testing.T, data claudecli.PluginData) Model {
+	t.Helper()
+	profiles := []config.Profile{
+		{Path: "/h/p0", Label: "p0"},
+		{Path: "/h/p1", Label: "p1"},
+	}
+	m := New(okRunner(), profiles)
+	resized, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = resized.(Model)
+	loaded, _ := m.Update(profileLoadedMsg{index: 0, plugins: data})
+	return loaded.(Model)
+}
+
+// TestNoMatchLineKeepsUnloadedColumnVisible pins the empty state against a
+// mixed column set: p0 has rows, so the unfiltered total is non-zero, but
+// blaming the query would replace the table and hide p1's spinner — and then
+// its error line, leaving a permanently failing profile invisible.
+func TestNoMatchLineKeepsUnloadedColumnVisible(t *testing.T) {
+	m := halfLoadedModel(t, multiPlugins())
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "z", "z", "z")
+	m, _ = press(t, m, "enter")
+
+	view := m.View()
+	if strings.Contains(view, "no plugins match") {
+		t.Errorf("a no-match query replaced the table while p1 was loading:\n%s", view)
+	}
+	if !strings.Contains(view, "loading") {
+		t.Errorf("a no-match query hid the loading column:\n%s", view)
+	}
+
+	errored, _ := m.Update(profileErrMsg{index: 1, gen: m.columns[1].gen, err: errors.New("boom")})
+	m = errored.(Model)
+
+	if view := m.View(); !strings.Contains(view, "boom") {
+		t.Errorf("a no-match query hid the column's load error:\n%s", view)
 	}
 }
 

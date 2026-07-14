@@ -1212,6 +1212,24 @@ func (m Model) pluginGroups() ([]model.PluginGroup, bool) {
 	return model.FilterPluginGroups(groups, m.filters[tabPlugins]), stale
 }
 
+// allLoaded reports whether every column has finished loading the tab's data.
+// The no-match empty state is gated on it: a column that is still loading or
+// has errored contributes no rows, so with any other column loaded the query
+// looks like the reason the table is empty when it is not, and replacing the
+// table would hide that column's spinner or error line.
+func (m Model) allLoaded(t tab) bool {
+	for i := range m.columns {
+		st := m.columns[i].status
+		if t == tabMCP {
+			st = m.columns[i].mcpStatus
+		}
+		if st != statusLoaded {
+			return false
+		}
+	}
+	return true
+}
+
 // activeFolds is the fold map in effect for the current render: none while a
 // filter is active, since a folded group would hide matching rows. The fold
 // state itself is kept, so clearing the filter restores it.
@@ -1236,10 +1254,11 @@ func (m Model) viewPlugins() string {
 	// folded.
 	total := len(visibleRefs(all, nil))
 	line := m.filterLine(len(refs), total)
-	// Only an empty *unfiltered* set can mean "the query excluded everything".
-	// Rows are also absent while the columns load or after they error, and
-	// there the table must still render its spinners and error lines.
-	if len(refs) == 0 && total > 0 && m.filters[tabPlugins] != "" {
+	// Only an empty set of rows drawn from fully loaded columns can mean "the
+	// query excluded everything". Rows are also absent while a column loads or
+	// after it errors, and there the table must still render its spinner and
+	// error line.
+	if len(refs) == 0 && total > 0 && m.filters[tabPlugins] != "" && m.allLoaded(tabPlugins) {
 		return line + m.noMatchLine("plugins")
 	}
 	selRow := max(0, min(m.selRow, len(refs)-1))
@@ -1297,7 +1316,7 @@ func (m Model) viewMCP() string {
 	rows := model.FilterMCPRows(all, m.filters[tabMCP])
 	line := m.filterLine(len(rows), len(all))
 	// See viewPlugins: loading and errored columns produce no rows either.
-	if len(rows) == 0 && len(all) > 0 && m.filters[tabMCP] != "" {
+	if len(rows) == 0 && len(all) > 0 && m.filters[tabMCP] != "" && m.allLoaded(tabMCP) {
 		return line + m.noMatchLine("MCP servers")
 	}
 	selRow := max(0, min(m.selRow, len(rows)-1))

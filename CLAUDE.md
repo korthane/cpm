@@ -112,11 +112,14 @@ behavior.
   would be invisible until the filter is cleared, and would then swallow rows
   the user never folded.
 - The `no plugins match` / `no MCP servers match` empty state is gated on the
-  *unfiltered* row set being non-empty. Loading and errored columns are skipped
-  by `allPluginGroups`/`allMCPRows`, so they produce zero rows too — blaming
-  that on the query would replace the table (and with it the per-column
-  spinners and `error:` lines) with a false "no matches" whenever a filter is
-  applied across a reload.
+  *unfiltered* row set being non-empty **and** on every column having loaded
+  (`allLoaded`). Loading and errored columns are skipped by
+  `allPluginGroups`/`allMCPRows`, so they produce zero rows too — blaming that
+  on the query would replace the table (and with it the per-column spinners and
+  `error:` lines) with a false "no matches". The row-set check alone is not
+  enough: with one column loaded and another still loading or errored, the
+  total is non-zero, so a no-match query would hide the other column's spinner
+  and its `error:` line for as long as the filter is applied.
 - `rowWindow` (`internal/ui/app.go`) sizes the scroll window as
   `height - chromeLines()`, where `chromeLines` is the count of non-body lines.
   It is not a constant: the filter line adds one, and focusing the filter input

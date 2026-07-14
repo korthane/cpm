@@ -120,6 +120,31 @@ func TestMCPFilterIndicatorAndEmptyState(t *testing.T) {
 	}
 }
 
+// TestMCPNoMatchLineKeepsUnloadedColumnVisible is the MCP twin of
+// TestNoMatchLineKeepsUnloadedColumnVisible: p1's MCP load is still in flight,
+// so the query is not what emptied the table and the spinner must survive it.
+func TestMCPNoMatchLineKeepsUnloadedColumnVisible(t *testing.T) {
+	m := halfLoadedModel(t, multiPlugins())
+	loaded, _ := m.Update(profileLoadedMsg{index: 1, plugins: multiPlugins()})
+	m = loaded.(Model)
+	m, _ = switchToMCP(t, m)
+	withMCP, _ := m.Update(mcpLoadedMsg{index: 0, gen: m.columns[0].mcpGen, servers: []claudecli.MCPServer{
+		{Name: "exa"}, {Name: "github"},
+	}})
+	m = withMCP.(Model)
+
+	m, _ = press(t, m, "/")
+	m = typeKeys(t, m, "z", "z", "z")
+
+	view := m.View()
+	if strings.Contains(view, "no MCP servers match") {
+		t.Errorf("a no-match query replaced the table while p1's MCP load ran:\n%s", view)
+	}
+	if !strings.Contains(view, "loading") {
+		t.Errorf("a no-match query hid the loading column:\n%s", view)
+	}
+}
+
 // TestMCPNavigationFollowsFilteredRows pins the row bound to the *filtered*
 // list: navigating past its end must not park the selection on a hidden row,
 // where the next remove would target a server the user cannot see.
