@@ -99,6 +99,19 @@ behavior.
   answer for `IsDefault` profiles with an empty profile dir — the runner
   strips the ambient env var when the dir is empty — and a clean logged-in
   fallback wins.
+- The `/` name filter is applied inside the `pluginGroups`/`mcpRows` accessors
+  (`internal/ui/app.go`), so every consumer — view, row count, folding,
+  selection, actions — sees the same filtered set through one choke point. Two
+  consequences: a filter forces the fold map to `nil` (`activeFolds`), because
+  a folded group would otherwise hide matches, and the indicator's match-count
+  denominator must come from the *unfiltered* `allPluginGroups`/`allMCPRows`.
+  Matching is `sahilm/fuzzy`'s order-preserving `FindNoSort` — plain `Find`
+  sorts by score and would re-rank rows under a grouped table.
+- `rowWindow` (`internal/ui/app.go`) sizes the scroll window as
+  `height - chromeLines()`, where `chromeLines` is the count of non-body lines.
+  It is not a constant: the filter line adds one, and focusing the filter input
+  removes one (the action help line is suppressed in that mode). Getting it
+  wrong does not fail loudly — it silently scrolls header chrome off-screen.
 - Outdated flags use a custom segment-wise numeric version compare in
   `internal/model` (leading `v` ignored, missing segment = 0, pre-release <
   release, empty never outdated, lexical fallback for non-numeric segments) —

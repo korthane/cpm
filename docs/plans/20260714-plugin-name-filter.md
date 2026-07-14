@@ -239,11 +239,14 @@ Dependencies identified:
 
 ### Task 7: [Final] Update documentation
 
-- [ ] document the `/` filter in `README.md` (key table and behavior: enter
+- [x] document the `/` filter in `README.md` (key table and behavior: enter
       keeps, esc clears, per-tab query, fuzzy match on plugin + marketplace name)
-- [ ] add a note to `CLAUDE.md` under non-obvious constraints if any emerged —
+- [x] add a note to `CLAUDE.md` under non-obvious constraints if any emerged —
       in particular the `rowWindow` chrome-line count and the auto-unfold rule
-- [ ] tick the `/` filter item in `TODO.md:8`
+      (➕ also the single-choke-point rule: the filter lives in the
+      `pluginGroups`/`mcpRows` accessors, which forces `activeFolds` to `nil`
+      and makes the indicator's denominator come from the raw accessors)
+- [x] tick the `/` filter item in `TODO.md:8`
 
 ## Technical Details
 

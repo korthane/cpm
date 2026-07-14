@@ -131,12 +131,35 @@ kicks in); malformed YAML or an unknown key (e.g. `profile:` instead of
 | `←` / `→` / `h` / `l` | select profile column (the table scrolls to keep it visible) |
 | `↑` / `↓` / `j` / `k` | select row (tall tables scroll to keep it visible) |
 | `tab` / `shift+tab` | cycle between the Plugins and MCP tabs |
+| `/` | filter rows by name (see below) |
 | `r` | reload the active tab's data |
 | `q` / `ctrl+c` | quit |
 
 Besides the selected cell, the selected row's pinned name cell (marketplace,
 plugin, or MCP server name) is shown in reverse video, so the current row
 stays findable on wide tables.
+
+### Filtering by name
+
+`/` opens a text input above the table and narrows the rows as you type. The
+match is fuzzy (a case-insensitive subsequence, so `fb` matches `foo-bar`) and
+literal — regex and glob characters have no special meaning. On the Plugins tab
+it is tried against both the plugin name and the marketplace name: a matching
+marketplace keeps its whole group, a marketplace with no matching plugins and a
+non-matching name drops out. Rows keep their marketplace grouping and
+alphabetical order; the filter never re-ranks them. Folded groups unfold while a
+filter is active — otherwise a fold would hide matches — and their fold state
+comes back once the filter is cleared.
+
+`enter` closes the input but keeps the filter applied, so navigation and action
+keys operate on the visible subset. `esc` clears the filter and restores the
+full list, both from inside the input and while navigating an already-filtered
+list. While the input is focused every rune goes into it: `q` does not quit and
+`e`/`d`/`u`/`x`/`i` do not fire actions, and the help line shows only the keys
+that work in that mode. With the input closed and a filter still applied, an
+indicator above the table shows the query and the match count, so an active
+filter is never invisible. Each tab keeps its own query, so switching tabs does
+not disturb the other's filter.
 
 Plugins tab, on a plugin row, applied to the selected cell:
 
