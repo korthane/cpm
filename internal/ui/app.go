@@ -507,6 +507,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinner.Tick,
 		)
 
+	case openDoneMsg:
+		if msg.err != nil {
+			m.setStatus(fmt.Sprintf("open %s failed: %v", msg.url, msg.err), true)
+		}
+		return m, nil
+
 	case spinner.TickMsg:
 		// The shared spinner keeps ticking while anything is still loading
 		// and dies out otherwise (the load helpers restart it).
@@ -610,6 +616,11 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startMCPAction(key.String())
 	case "enter", " ":
 		return m.toggleFold(), nil
+	case "o":
+		if link := m.selectedChangeLink(); link != "" {
+			return m, openLink(link)
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -1186,6 +1197,9 @@ func (m Model) View() string {
 		}
 	default:
 		b.WriteString("\ne: enable  d: disable  u: update  x: uninstall  i: install")
+		if m.selectedChangeLink() != "" {
+			b.WriteString("  o: open changes")
+		}
 	}
 	b.WriteString("\n")
 	return b.String()
@@ -1203,15 +1217,19 @@ func (m Model) selectedMarketplaceRow() bool {
 }
 
 // statusLine renders the confirmation prompt when one is pending, otherwise
-// the transient status/error text (possibly empty). The text is capped at the
-// terminal width: rowWindow budgets exactly one row for this line, so letting
-// a long CLI error soft-wrap would push the header chrome off-screen.
+// the transient status/error text, otherwise the selected cell's change link
+// (possibly empty). The text is capped at the terminal width: rowWindow
+// budgets exactly one row for this line, so letting a long CLI error
+// soft-wrap would push the header chrome off-screen.
 func (m Model) statusLine() string {
 	if m.pending != nil {
 		return m.fitWidth(fmt.Sprintf("%s %s from %s? y/n", m.pending.verb,
 			m.pending.target, m.columns[m.pending.col].profile.Label))
 	}
 	if m.status == "" {
+		if link := m.selectedChangeLink(); link != "" {
+			return statusStyle.Render(m.fitWidth("changes: " + link))
+		}
 		return ""
 	}
 	text := m.fitWidth(m.status)
@@ -1236,21 +1254,60 @@ func (m Model) fitWidth(s string) string {
 // that profile fell back to its cached catalog). The name filter is not
 // applied — see pluginGroups.
 func (m Model) allPluginGroups() ([]model.PluginGroup, bool) {
+	perProfile, perLatest := m.loadedPluginData()
+	latest, stale := model.MergeLatestVersions(perLatest)
+	groups := model.BuildPluginGroups(perProfile, latest)
+	return groups, stale
+}
+
+// loadedPluginData returns each column's plugin data and latest versions,
+// zero for columns not loaded: a column that failed to (re)load keeps its
+// previous data but renders blank cells, so feeding that data into the
+// groups would produce rows with no visible owner.
+func (m Model) loadedPluginData() ([]claudecli.PluginData, []claudecli.LatestVersions) {
 	perProfile := make([]claudecli.PluginData, len(m.columns))
 	perLatest := make([]claudecli.LatestVersions, len(m.columns))
 	for i := range m.columns {
-		// A column that failed to (re)load keeps its previous data but renders
-		// blank cells; feeding that data into the groups would produce rows
-		// with no visible owner.
 		if m.columns[i].status != statusLoaded {
 			continue
 		}
 		perProfile[i] = m.columns[i].plugins
 		perLatest[i] = m.columns[i].latest
 	}
-	latest, stale := model.MergeLatestVersions(perLatest)
-	groups := model.BuildPluginGroups(perProfile, latest)
-	return groups, stale
+	return perProfile, perLatest
+}
+
+// selectedChangeLink is the URL `o` opens for the selected cell: the compare
+// URL from its install to the latest commit, else the plugin's history URL.
+// Empty unless the selection is an outdated plugin cell on the plugins tab.
+func (m Model) selectedChangeLink() string {
+	if m.tab != tabPlugins {
+		return ""
+	}
+	groups, _ := m.pluginGroups()
+	refs := m.visiblePluginRefs(groups)
+	if len(refs) == 0 {
+		return ""
+	}
+	ref := refs[min(m.selRow, len(refs)-1)]
+	if ref.kind == rowMarketplace {
+		return ""
+	}
+	row := groups[ref.group].Plugins[ref.plugin]
+	cell := row.Cells[m.selCol]
+	if !cell.Outdated {
+		return ""
+	}
+	_, perLatest := m.loadedPluginData()
+	src, ok := model.LatestSource(perLatest, row.ID, row.LatestVersion)
+	if !ok {
+		return ""
+	}
+	compare, history := model.ChangeLinks(src, cell.CommitSHA)
+	if compare != "" {
+		return compare
+	}
+	return history
 }
 
 // pluginGroups is allPluginGroups narrowed by the plugins tab's query — the

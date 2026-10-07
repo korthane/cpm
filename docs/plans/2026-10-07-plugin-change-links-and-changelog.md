@@ -389,20 +389,21 @@
 - Modify: `internal/ui/app.go`
 - Create: `internal/ui/open.go` (opener with timeout and URL guard)
 - Create: `internal/ui/links_test.go`
+- Create: `internal/ui/main_test.go` (HOME sandbox, opener tripwire)
 
-- [ ] write tests: selecting an outdated cell with a link shows
+- [x] write tests: selecting an outdated cell with a link shows
       `changes: <url>` in the status slot; a pending prompt or status message
       takes precedence; non-outdated or link-less cells show nothing
-- [ ] write tests: help line shows `o: open changes` only when the selected
+- [x] write tests: help line shows `o: open changes` only when the selected
       cell has a link; `o` calls the stubbed opener with the compare URL
       (history URL fallback); opener error sets an error status; `o` on a
       link-less cell, a marketplace header row or the MCP tab is a no-op;
       `o` while the filter input is focused types a literal `o`
-- [ ] write tests for the opener guard: non-`https://github.com/` URLs are
+- [x] write tests for the opener guard: non-`https://github.com/` URLs are
       refused without exec
-- [ ] implement the status rendering, `o` key, injectable `openURL` and help
+- [x] implement the status rendering, `o` key, injectable `openURL` and help
       hint
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
 
 ### Task 9: Verify acceptance criteria
 - [ ] verify all requirements from Overview are implemented
