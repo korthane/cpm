@@ -85,8 +85,15 @@ type availableJSON struct {
 	Source   json.RawMessage `json:"source"`
 }
 
+// sourceJSON is an object `source` of a catalog entry: a remote repo given
+// by `repo` (github) or `url` (url, git-subdir), with optional `path`
+// inside it, `ref` and pinned `sha`.
 type sourceJSON struct {
-	Ref string `json:"ref"`
+	Repo string `json:"repo"`
+	URL  string `json:"url"`
+	Path string `json:"path"`
+	Ref  string `json:"ref"`
+	SHA  string `json:"sha"`
 }
 
 type pluginListJSON struct {
@@ -96,14 +103,21 @@ type pluginListJSON struct {
 
 // LoadPlugins fetches and parses installed + available plugins for one profile.
 func LoadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, error) {
+	data, _, err := loadPlugins(ctx, r, profileDir)
+	return data, err
+}
+
+// loadPlugins is LoadPlugins plus each available entry's raw `source`,
+// index-aligned with PluginData.Available.
+func loadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, []json.RawMessage, error) {
 	out, err := r.Run(ctx, profileDir, "plugin", "list", "--available", "--json")
 	if err != nil {
-		return PluginData{}, err
+		return PluginData{}, nil, err
 	}
 
 	var raw pluginListJSON
 	if err := json.Unmarshal(out, &raw); err != nil {
-		return PluginData{}, fmt.Errorf("parse plugin list: %w", err)
+		return PluginData{}, nil, fmt.Errorf("parse plugin list: %w", err)
 	}
 
 	data := PluginData{}
@@ -120,13 +134,15 @@ func LoadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, 
 			InstallPath: p.InstallPath,
 		})
 	}
+	sources := make([]json.RawMessage, 0, len(raw.Available))
 	for _, a := range raw.Available {
 		data.Available = append(data.Available, AvailablePlugin{
 			ID:            ParsePluginID(a.PluginID),
 			LatestVersion: latestVersion(a),
 		})
+		sources = append(sources, a.Source)
 	}
-	return data, nil
+	return data, sources, nil
 }
 
 // latestVersion resolves a catalog entry's version: the explicit `version`

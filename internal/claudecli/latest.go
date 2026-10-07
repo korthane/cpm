@@ -25,9 +25,10 @@ type Marketplace struct {
 	URL             string `json:"url"`
 	Path            string `json:"path"`
 	InstallLocation string `json:"installLocation"`
-	// CommitHash and CommitDate (YYYY-MM-DD) of the marketplace clone are
-	// filled by the loader via git; marketplaces have no version field, so
-	// this is the only freshness signal.
+	// HeadSHA, CommitHash (its short form) and CommitDate (YYYY-MM-DD) of
+	// the marketplace clone are filled by the loader via git; marketplaces
+	// have no version field, so this is the only freshness signal.
+	HeadSHA    string `json:"-"`
 	CommitHash string `json:"-"`
 	CommitDate string `json:"-"`
 }
@@ -51,6 +52,9 @@ func (m Marketplace) SourceArg() string {
 // entry means no version could be determined for that plugin.
 type LatestVersions struct {
 	Versions map[PluginID]string
+	// Sources says where each resolved latest version lives; it is set
+	// only for plugins with a non-empty version, by the same entry.
+	Sources map[PluginID]PluginSource
 	// Stale is set when the marketplace refresh failed and Versions therefore
 	// come from the previously cached catalogs.
 	Stale bool
@@ -125,7 +129,7 @@ func LoadPluginsFresh(ctx context.Context, r Runner, profileDir string) (PluginD
 // override and fills installed plugins, which `available` leaves out.
 // File reads are best-effort and confined to the clone (readCloneCatalog).
 func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (PluginData, LatestVersions, error) {
-	data, err := LoadPlugins(ctx, r, profileDir)
+	data, availableSources, err := loadPlugins(ctx, r, profileDir)
 	if err != nil {
 		return PluginData{}, LatestVersions{}, err
 	}
@@ -142,13 +146,21 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 	data.MarketplacesUnknown = mErr != nil
 	fillInstalledCommits(profileDir, data.Installed)
 
-	lv := LatestVersions{Versions: map[PluginID]string{}}
-	for _, a := range data.Available {
+	marketByName := make(map[string]Marketplace, len(markets))
+	for _, mkt := range markets {
+		marketByName[mkt.Name] = mkt
+	}
+	lv := LatestVersions{
+		Versions: map[PluginID]string{},
+		Sources:  map[PluginID]PluginSource{},
+	}
+	for i, a := range data.Available {
 		// Catalogs can list the same plugin twice (e.g. one marketplace under
 		// two entries); a later duplicate without a version must not erase an
 		// already-resolved one.
 		if lv.Versions[a.ID] == "" {
-			lv.Versions[a.ID] = a.LatestVersion
+			lv.setLatest(a.ID, a.LatestVersion,
+				pluginSource(marketByName[a.ID.Marketplace], availableSources[i]))
 		}
 	}
 	for _, p := range data.Installed {
@@ -156,25 +168,68 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 			lv.Versions[p.ID] = ""
 		}
 	}
-	applyCatalogFiles(markets, lv.Versions)
+	applyCatalogFiles(markets, &lv)
 	return data, lv, nil
+}
+
+// setLatest records version for id together with the source it came from.
+func (lv *LatestVersions) setLatest(id PluginID, version string,
+	src PluginSource) {
+	lv.Versions[id] = version
+	if version == "" {
+		delete(lv.Sources, id)
+		return
+	}
+	lv.Sources[id] = src
+}
+
+// pluginSource describes where a catalog entry's plugin lives. A relative
+// string source is a path inside the clone of mkt: Path and CloneDir are
+// always kept for the changelog read, while the repo and HEAD SHA are set
+// only as a pair, when both are known. An object source is remote: its repo,
+// pinned `sha` (else `ref`, which may be a moving branch) and `path`.
+func pluginSource(mkt Marketplace, raw json.RawMessage) PluginSource {
+	var rel string
+	if json.Unmarshal(raw, &rel) == nil {
+		src := PluginSource{Path: rel, CloneDir: mkt.InstallLocation}
+		repo := mkt.Repo
+		if mkt.Source == "git" {
+			repo = mkt.URL
+		}
+		if mkt.Source != "directory" && repo != "" && mkt.HeadSHA != "" {
+			src.RepoURL, src.Commit = repo, mkt.HeadSHA
+		}
+		return src
+	}
+	var obj sourceJSON
+	if json.Unmarshal(raw, &obj) != nil {
+		return PluginSource{}
+	}
+	return PluginSource{
+		RepoURL: cmp.Or(obj.URL, obj.Repo),
+		Commit:  cmp.Or(obj.SHA, obj.Ref),
+		Path:    obj.Path,
+	}
 }
 
 // catalogVersions is what the on-disk catalog says about one plugin: the
 // version from its own plugin.json, and the entry's `version` (or
-// version-like `source.ref`).
+// version-like `source.ref`), each with the `source` of the entry that
+// supplied it.
 type catalogVersions struct {
-	Manifest string
-	Entry    string
+	Manifest       string
+	ManifestSource json.RawMessage
+	Entry          string
+	EntrySource    json.RawMessage
 }
 
 // applyCatalogFiles applies the on-disk catalogs of the listed marketplaces
-// to versions: a plugin.json version overrides, a catalog entry version only
+// to lv: a plugin.json version overrides, a catalog entry version only
 // fills an empty entry.
-func applyCatalogFiles(markets []Marketplace, versions map[PluginID]string) {
+func applyCatalogFiles(markets []Marketplace, lv *LatestVersions) {
 	for _, mkt := range markets {
 		var ids []PluginID
-		for id := range versions {
+		for id := range lv.Versions {
 			if id.Marketplace == mkt.Name {
 				ids = append(ids, id)
 			}
@@ -187,9 +242,9 @@ func applyCatalogFiles(markets []Marketplace, versions map[PluginID]string) {
 			c := catalog[id.Name]
 			switch {
 			case c.Manifest != "":
-				versions[id] = c.Manifest
-			case versions[id] == "":
-				versions[id] = c.Entry
+				lv.setLatest(id, c.Manifest, pluginSource(mkt, c.ManifestSource))
+			case lv.Versions[id] == "":
+				lv.setLatest(id, c.Entry, pluginSource(mkt, c.EntrySource))
 			}
 		}
 	}
@@ -221,13 +276,18 @@ func readCloneCatalog(installLocation string) map[string]catalogVersions {
 	}
 	byName := make(map[string]catalogVersions, len(entries))
 	for _, e := range entries {
-		prev := byName[e.Name]
+		c := byName[e.Name]
 		// A duplicate entry must not erase what an earlier one resolved.
-		entry := availableJSON{Version: e.Version, Source: e.Source}
-		byName[e.Name] = catalogVersions{
-			Manifest: cmp.Or(prev.Manifest, manifestVersion(root, e.Source)),
-			Entry:    cmp.Or(prev.Entry, latestVersion(entry)),
+		if c.Manifest == "" {
+			c.Manifest = manifestVersion(root, e.Source)
+			c.ManifestSource = e.Source
 		}
+		if c.Entry == "" {
+			c.Entry = latestVersion(
+				availableJSON{Version: e.Version, Source: e.Source})
+			c.EntrySource = e.Source
+		}
+		byName[e.Name] = c
 	}
 	return byName
 }

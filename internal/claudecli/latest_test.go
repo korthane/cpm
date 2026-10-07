@@ -168,7 +168,7 @@ func TestLoadPluginsFreshReturnsDataAndVersions(t *testing.T) {
 func TestLoadPluginsCachedPopulatesMarketplaces(t *testing.T) {
 	stubGitCommitInfo(t, func(_ context.Context, dir string) (string, string, error) {
 		if dir == "/loc/m1" {
-			return "abc1234", "2026-06-28", nil
+			return "abc1234" + strings.Repeat("0", 33), "2026-06-28", nil
 		}
 		return "", "", errors.New("not a git repository")
 	})
@@ -192,6 +192,7 @@ func TestLoadPluginsCachedPopulatesMarketplaces(t *testing.T) {
 	want := []Marketplace{
 		{
 			Name: "m1", Source: "github", Repo: "a/b", InstallLocation: "/loc/m1",
+			HeadSHA:    "abc1234" + strings.Repeat("0", 33),
 			CommitHash: "abc1234", CommitDate: "2026-06-28",
 		},
 		// git failed for m2 (a plain directory) — commit fields stay blank.
@@ -217,7 +218,7 @@ func TestLoadPluginsCachedPopulatesMarketplaces(t *testing.T) {
 
 func TestLoadPluginsFreshPopulatesMarketplaces(t *testing.T) {
 	stubGitCommitInfo(t, func(context.Context, string) (string, string, error) {
-		return "def5678", "2026-07-01", nil
+		return "def5678" + strings.Repeat("9", 33), "2026-07-01", nil
 	})
 	f := &FakeRunner{
 		Responses: map[string]FakeResponse{
@@ -821,5 +822,183 @@ func TestLoadPluginsCachedIgnoresCatalogSymlinkedOutOfClone(t *testing.T) {
 
 	if v := lv.Versions[PluginID{Name: "foo", Marketplace: "m1"}]; v != "" {
 		t.Errorf("foo@m1 = %q, want empty", v)
+	}
+}
+
+const (
+	testHeadSHA   = "5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80"
+	testPinnedSHA = "9a8b7c6d5e4f30211234567890abcdef12345678"
+)
+
+// loadSourcesFixture runs LoadPluginsCached against one marketplace whose
+// clone is dir; git reports headSHA, or fails when it is empty.
+func loadSourcesFixture(t *testing.T, market, headSHA, pluginList string) LatestVersions {
+	t.Helper()
+	stubGitCommitInfo(t, func(context.Context, string) (string, string, error) {
+		if headSHA == "" {
+			return "", "", errors.New("not a git repository")
+		}
+		return headSHA, "2026-06-28", nil
+	})
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin list --available --json": {Stdout: []byte(pluginList)},
+			"plugin marketplace list --json": {Stdout: []byte("[" + market + "]")},
+		},
+	}
+	_, lv, err := LoadPluginsCached(t.Context(), f, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return lv
+}
+
+func TestLoadPluginsCachedSourcesRelative(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "widget", "source": "./plugins/widget"},
+		{"name": "gadget", "version": "2.0.0", "source": "./plugins/gadget"}
+	]}`)
+	writePluginManifest(t, filepath.Join(dir, "plugins", "widget"), "1.4.0")
+	loc := strconv.Quote(dir)
+	list := `{
+		"installed": [{"id": "widget@example-market", "version": "1.2.0",
+			"enabled": true, "scope": "user"}],
+		"available": [{"pluginId": "gadget@example-market", "version": "2.0.0",
+			"source": "./plugins/gadget"}]
+	}`
+
+	tests := []struct {
+		name     string
+		market   string
+		headSHA  string
+		wantRepo string
+		wantSHA  string
+	}{
+		{
+			name: "github marketplace",
+			market: `{"name": "example-market", "source": "github",
+				"repo": "acme/widgets", "installLocation": ` + loc + `}`,
+			headSHA: testHeadSHA, wantRepo: "acme/widgets", wantSHA: testHeadSHA,
+		},
+		{
+			name: "git marketplace",
+			market: `{"name": "example-market", "source": "git",
+				"url": "https://github.com/acme/widgets.git",
+				"installLocation": ` + loc + `}`,
+			headSHA:  testHeadSHA,
+			wantRepo: "https://github.com/acme/widgets.git", wantSHA: testHeadSHA,
+		},
+		{
+			name: "git failing",
+			market: `{"name": "example-market", "source": "github",
+				"repo": "acme/widgets", "installLocation": ` + loc + `}`,
+		},
+		{
+			name: "directory marketplace",
+			market: `{"name": "example-market", "source": "directory",
+				"path": ` + loc + `, "installLocation": ` + loc + `}`,
+			headSHA: testHeadSHA,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lv := loadSourcesFixture(t, tt.market, tt.headSHA, list)
+			want := map[string]PluginSource{
+				"widget": {RepoURL: tt.wantRepo, Commit: tt.wantSHA,
+					Path: "./plugins/widget", CloneDir: dir},
+				"gadget": {RepoURL: tt.wantRepo, Commit: tt.wantSHA,
+					Path: "./plugins/gadget", CloneDir: dir},
+			}
+			for name, src := range want {
+				id := PluginID{Name: name, Marketplace: "example-market"}
+				if got := lv.Sources[id]; got != src {
+					t.Errorf("%s source = %+v, want %+v", name, got, src)
+				}
+			}
+		})
+	}
+}
+
+func TestLoadPluginsCachedSourcesRemote(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "on-disk", "version": "3.0.0", "source": {"source": "github",
+			"repo": "acme/disk", "sha": "`+testPinnedSHA+`"}}
+	]}`)
+	market := `{"name": "example-market", "source": "github",
+		"repo": "acme/market", "installLocation": ` + strconv.Quote(dir) + `}`
+	lv := loadSourcesFixture(t, market, testHeadSHA, `{
+		"installed": [{"id": "on-disk@example-market", "version": "2.0.0",
+			"enabled": true, "scope": "user"}],
+		"available": [
+			{"pluginId": "by-url@example-market", "version": "1.4.0",
+				"source": {"source": "url",
+					"url": "https://github.com/acme/widgets.git",
+					"ref": "v1.4.0", "sha": "`+testPinnedSHA+`"}},
+			{"pluginId": "by-github@example-market",
+				"source": {"source": "github", "repo": "acme/widgets",
+					"ref": "v1.4.0"}},
+			{"pluginId": "by-subdir@example-market", "version": "1.4.0",
+				"source": {"source": "git-subdir",
+					"url": "git@github.com:acme/widgets.git",
+					"path": "plugins/widget", "sha": "`+testPinnedSHA+`"}}
+		]
+	}`)
+
+	want := map[string]PluginSource{
+		"by-url": {RepoURL: "https://github.com/acme/widgets.git",
+			Commit: testPinnedSHA},
+		"by-github": {RepoURL: "acme/widgets", Commit: "v1.4.0"},
+		"by-subdir": {RepoURL: "git@github.com:acme/widgets.git",
+			Commit: testPinnedSHA, Path: "plugins/widget"},
+		"on-disk": {RepoURL: "acme/disk", Commit: testPinnedSHA},
+	}
+	for name, src := range want {
+		id := PluginID{Name: name, Marketplace: "example-market"}
+		if got := lv.Sources[id]; got != src {
+			t.Errorf("%s source = %+v, want %+v", name, got, src)
+		}
+	}
+}
+
+// The source must describe the entry whose version won, or a link would
+// point at a different version than the one reported.
+func TestLoadPluginsCachedSourceFollowsWinningVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "dup", "source": "./plugins/dup-a"},
+		{"name": "dup", "source": "./plugins/dup-b"},
+		{"name": "unversioned", "source": "./plugins/none"}
+	]}`)
+	writePluginManifest(t, filepath.Join(dir, "plugins", "dup-b"), "2.0.0")
+	market := `{"name": "example-market", "source": "github",
+		"repo": "acme/widgets", "installLocation": ` + strconv.Quote(dir) + `}`
+	lv := loadSourcesFixture(t, market, testHeadSHA, `{
+		"installed": [
+			{"id": "dup@example-market", "version": "1.0.0",
+				"enabled": true, "scope": "user"},
+			{"id": "unversioned@example-market", "version": "1.0.0",
+				"enabled": true, "scope": "user"}
+		],
+		"available": [
+			{"pluginId": "first@example-market", "version": "1.0.0",
+				"source": {"source": "github", "repo": "acme/first"}},
+			{"pluginId": "first@example-market",
+				"source": {"source": "github", "repo": "acme/second"}}
+		]
+	}`)
+
+	dup := PluginID{Name: "dup", Marketplace: "example-market"}
+	if got := lv.Sources[dup].Path; got != "./plugins/dup-b" {
+		t.Errorf("dup path = %q, want the entry whose manifest won", got)
+	}
+	first := PluginID{Name: "first", Marketplace: "example-market"}
+	if got := lv.Sources[first].RepoURL; got != "acme/first" {
+		t.Errorf("first repo = %q, want the entry that set the version", got)
+	}
+	none := PluginID{Name: "unversioned", Marketplace: "example-market"}
+	if src, ok := lv.Sources[none]; ok {
+		t.Errorf("unversioned source = %+v, want none without a version", src)
 	}
 }

@@ -62,3 +62,24 @@ func TestLoadPluginsCachedSkipsFIFOCatalogFiles(t *testing.T) {
 		t.Fatal("load blocked on a FIFO plugin.json")
 	}
 }
+
+func TestReadChangelogRefusesFIFO(t *testing.T) {
+	dir := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(dir, "CHANGELOG.md"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := ReadChangelog(PluginSource{Path: ".", CloneDir: dir})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected error for a FIFO changelog")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ReadChangelog blocked on a FIFO")
+	}
+}

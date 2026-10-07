@@ -308,22 +308,28 @@
 **Files:**
 - Modify: `internal/claudecli/gitinfo.go`
 - Modify: `internal/claudecli/latest.go`
-- Modify: `internal/claudecli/latest_test.go`, `export_test.go`
+- Modify: `internal/claudecli/latest_test.go`, `gitinfo_test.go`,
+  `latest_unix_test.go` (FIFO test), `plugins.go` (raw available
+  `source`s via `loadPlugins`); `export_test.go` needed no change
 - Create: `internal/claudecli/changelog.go`, `changelog_test.go`
 
-- [ ] write tests: `Sources` filled for a relative source (marketplace repo,
+- [x] write tests: `Sources` filled for a relative source (marketplace repo,
       clone HEAD full SHA, plugin path, clone dir) and a remote source (`url`
       / `github` / `git-subdir` with `sha`, `ref`-only fallback); a relative
       source with git failing or a directory marketplace keeps `Path` and
       `CloneDir` with empty `Commit`/`RepoURL`
-- [ ] write tests for `ReadChangelog`: plugin-dir file wins over root;
+- [x] write tests for `ReadChangelog`: plugin-dir file wins over root;
       root fallback; none; symlink escaping the clone and FIFO refused
-- [ ] switch `gitCommitInfo` to `%H %cs` (same signature), store
+- [x] switch `gitCommitInfo` to `%H %cs` (same signature), store
       `Marketplace.HeadSHA`, derive the short `CommitHash`; update stub data
-- [ ] keep `url`/`repo`/`path`/`sha`/`ref` from catalog entries and fill
+- [x] keep `url`/`repo`/`path`/`sha`/`ref` from catalog entries and fill
       `LatestVersions.Sources`
-- [ ] implement `ReadChangelog` via `OpenRoot` + `readCloneFile`
-- [ ] run tests - must pass before next task
+- [x] implement `ReadChangelog` via `OpenRoot` + `readCloneFile`
+- [x] run tests - must pass before next task
+- [x] ➕ a source is recorded only alongside a non-empty latest version, by
+      the same entry (`LatestVersions.setLatest`); a relative source sets
+      `RepoURL` and `Commit` only as a pair, so a failed git lookup leaves
+      both empty even when the marketplace repo is known
 
 ### Task 5: Merge the latest source across profiles (model)
 
