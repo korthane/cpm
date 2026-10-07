@@ -100,10 +100,15 @@
   `IsCommand`, `ParseArgs(args) (Options, error)` and `Run`. `Run` returns an
   exit code, so `main` stays thin and everything is testable with
   `FakeRunner`.
-- **Outdated computation** reuses `model.MergeLatestVersions` and
-  `model.BuildPluginMatrix`, so the CLI and the TUI agree on what "outdated"
-  means. A profile with an old clone still benefits from a newer catalog in
-  another profile.
+- **Outdated computation** reuses `model.MergeLatestVersions` for latest
+  versions and the matrix's ordering (`model.ComparePluginIDs`) and version
+  compare (`model.IsOutdated`, the exported form of `versionLess`), so the CLI
+  and the TUI agree on what "outdated" means. It evaluates *every*
+  `Installed` entry of every profile rather than `BuildPluginMatrix` cells:
+  the matrix collapses a plugin installed at several scopes in one profile
+  into one cell (user scope wins), which would hide an outdated project-scope
+  install beside a current user-scope one. A profile with an old clone still
+  benefits from a newer catalog in another profile.
 - **Concurrency:** load profiles in parallel, one goroutine per profile.
   Within the process there is one writer per config dir, because each profile
   gets its own `marketplace update` and `config.normalize` dedups profiles by
@@ -269,6 +274,8 @@
 **Files:**
 - Create: `internal/cli/outdated.go`
 - Create: `internal/cli/outdated_test.go`
+- ➕ Modify: `internal/cli/cli.go` (drop the stub), `internal/model/matrix.go`,
+  `internal/model/matrix_test.go`
 
 Test setup note: `gitCommitInfo` cannot be stubbed from `internal/cli`.
 Fake `plugin marketplace list` responses must keep `installLocation` empty,
@@ -276,31 +283,37 @@ and latest versions come from canned `available` entries (use
 `ResponsesByDir` to vary them per profile). The catalog-file path is covered
 in Task 1.
 
-- [ ] write failing tests with `FakeRunner` across two profiles:
+- [x] write failing tests with `FakeRunner` across two profiles:
   - one outdated plugin installed in both profiles
   - an up-to-date plugin (must be omitted)
   - a disabled outdated install (included, marked)
   - a non-`user` scope install (marked)
   - an `unknown` installed version (omitted)
-- [ ] write failing tests for error and empty cases:
+- [x] write failing tests for error and empty cases:
   - the latest version comes from the *other* profile's newer catalog
   - a profile load error → on stderr in text mode, in `error` in JSON mode
     (stderr empty); other profiles still listed; exit `1`
   - an empty result → `all plugins up to date` / `"outdated": []`, exit `0`
-- [ ] write failing tests for `--refresh`:
+- [x] write failing tests for `--refresh`:
   - without it, no `plugin marketplace update` call is recorded and
     `"refresh": "skipped"`
   - with it, one call is recorded per profile → `"ok"`
   - a failed refresh → stderr warning in text mode, `"failed"` in JSON, exit
     `0`
-- [ ] implement the parallel per-profile load (`LoadPluginsCached`, or
+- [x] implement the parallel per-profile load (`LoadPluginsCached`, or
   `LoadPluginsFresh` with `--refresh`) under `loadTimeout`. Then build the
   result with `MergeLatestVersions` + `BuildPluginMatrix` and keep only rows
-  with an `Outdated` cell.
-- [ ] implement the text renderer (tabwriter, label falling back to path,
+  with an `Outdated` cell. (Amended: evaluate every `Installed` entry
+  instead of matrix cells; see the ➕ item below.)
+- [x] implement the text renderer (tabwriter, label falling back to path,
   scope and disabled markers, errors and warnings on stderr) and the JSON
   renderer (the shape in Technical Details, with non-nil slices)
-- [ ] run `make test` and `go test -race ./internal/cli/...` - must pass
+- [x] ➕ report every outdated install, not one cell per profile: export
+  `model.IsOutdated` and `model.ComparePluginIDs` (shared with
+  `BuildPluginMatrix`), and test one profile holding a plugin at user scope
+  (current) and project scope (outdated) → the project install is reported
+  as `(scope: project)` / `"scope": "project"`
+- [x] run `make test` and `go test -race ./internal/cli/...` - must pass
   before next task
 
 ### Task 5: `refresh` command

@@ -85,12 +85,18 @@ func BuildPluginMatrix(perProfile []claudecli.PluginData, latest map[claudecli.P
 		rows = append(rows, *row)
 	}
 	slices.SortFunc(rows, func(a, b PluginRow) int {
-		return cmp.Or(
-			cmp.Compare(a.ID.Marketplace, b.ID.Marketplace),
-			cmp.Compare(a.ID.Name, b.ID.Name),
-		)
+		return ComparePluginIDs(a.ID, b.ID)
 	})
 	return rows
+}
+
+// ComparePluginIDs orders plugins by marketplace, then name — the row order
+// of BuildPluginMatrix — for slices.SortFunc.
+func ComparePluginIDs(a, b claudecli.PluginID) int {
+	return cmp.Or(
+		cmp.Compare(a.Marketplace, b.Marketplace),
+		cmp.Compare(a.Name, b.Name),
+	)
 }
 
 // MergeLatestVersions unions the per-profile resolved latest versions into
@@ -113,6 +119,13 @@ func MergeLatestVersions(perProfile []claudecli.LatestVersions) (map[claudecli.P
 		}
 	}
 	return latest, stale
+}
+
+// IsOutdated reports whether an installed version is strictly behind latest,
+// with the same rules as PluginCell.Outdated: an empty side is never
+// outdated.
+func IsOutdated(installed, latest string) bool {
+	return versionLess(installed, latest)
 }
 
 // versionLess reports whether version a is strictly older than b. Unknown

@@ -304,3 +304,41 @@ func TestMergeLatestVersionsStaleWhenAnyProfileStale(t *testing.T) {
 		t.Error("stale = false, want true when one profile's refresh failed")
 	}
 }
+
+func TestIsOutdated(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		installed, latest string
+		want              bool
+	}{
+		{"0.34.0", "0.35.1", true},
+		{"0.35.1", "0.35.1", false},
+		{"1.5.5", "v1.5.6", true},
+		{"", "1.0.0", false},
+		{"1.0.0", "", false},
+	}
+	for _, tt := range tests {
+		if got := IsOutdated(tt.installed, tt.latest); got != tt.want {
+			t.Errorf("IsOutdated(%q, %q) = %v, want %v",
+				tt.installed, tt.latest, got, tt.want)
+		}
+	}
+}
+
+func TestComparePluginIDsOrdersByMarketplaceThenName(t *testing.T) {
+	t.Parallel()
+	ids := []claudecli.PluginID{
+		{Name: "b", Marketplace: "z"},
+		{Name: "c", Marketplace: "a"},
+		{Name: "a", Marketplace: "z"},
+	}
+	slices.SortFunc(ids, ComparePluginIDs)
+	want := []claudecli.PluginID{
+		{Name: "c", Marketplace: "a"},
+		{Name: "a", Marketplace: "z"},
+		{Name: "b", Marketplace: "z"},
+	}
+	if !slices.Equal(ids, want) {
+		t.Errorf("sorted = %v, want %v", ids, want)
+	}
+}

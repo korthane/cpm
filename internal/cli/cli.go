@@ -165,13 +165,6 @@ func Run(ctx context.Context, r claudecli.Runner, profiles []config.Profile,
 	return cmd.run(ctx, r, profiles, opts, stdout, stderr)
 }
 
-// TODO: the latest-versions plan, Task 4, implements this.
-func runOutdated(_ context.Context, _ claudecli.Runner, _ []config.Profile,
-	_ Options, _, stderr io.Writer) int {
-	_, _ = fmt.Fprintln(stderr, "cpm: outdated: not implemented")
-	return 1
-}
-
 // TODO: the latest-versions plan, Task 5, implements this.
 func runRefresh(_ context.Context, _ claudecli.Runner, _ []config.Profile,
 	_ Options, _, stderr io.Writer) int {
