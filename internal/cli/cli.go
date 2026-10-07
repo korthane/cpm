@@ -9,6 +9,8 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/korthane/cpm/internal/claudecli"
 	"github.com/korthane/cpm/internal/config"
@@ -49,6 +51,9 @@ func (e *UsageError) Error() string {
 	}
 	return e.Command + ": " + e.Msg
 }
+
+// loadTimeout bounds each profile's work; it matches the UI's cmdTimeout.
+const loadTimeout = 2 * time.Minute
 
 type command struct {
 	usage string
@@ -149,8 +154,10 @@ func isHelpFlag(arg string) bool {
 }
 
 // Run executes opts.Command against profiles and returns the process exit
-// code: 0 success, 1 a profile failed, 2 usage error. In JSON mode errors
-// are carried in the JSON and stderr stays empty.
+// code: 0 success, 1 a profile failed or stdout could not be written,
+// 2 usage error. In JSON mode command results and per-profile errors are
+// carried in the JSON and stderr stays empty; usage errors (including an
+// unknown command) and a failed stdout write stay plain stderr text.
 func Run(ctx context.Context, r claudecli.Runner, profiles []config.Profile,
 	opts Options, stdout, stderr io.Writer) int {
 	cmd, ok := commands[opts.Command]
@@ -165,9 +172,33 @@ func Run(ctx context.Context, r claudecli.Runner, profiles []config.Profile,
 	return cmd.run(ctx, r, profiles, opts, stdout, stderr)
 }
 
-// TODO: the latest-versions plan, Task 5, implements this.
-func runRefresh(_ context.Context, _ claudecli.Runner, _ []config.Profile,
-	_ Options, _, stderr io.Writer) int {
-	_, _ = fmt.Fprintln(stderr, "cpm: refresh: not implemented")
-	return 1
+// mapProfiles runs fn for every profile in parallel, each under loadTimeout;
+// results keep profile order. Each goroutine owns its own config dir, so
+// writes never overlap within this process.
+func mapProfiles[T any](ctx context.Context, profiles []config.Profile,
+	fn func(context.Context, config.Profile) T) []T {
+	results := make([]T, len(profiles))
+	var wg sync.WaitGroup
+	for i, p := range profiles {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(ctx, loadTimeout)
+			defer cancel()
+			results[i] = fn(ctx, p)
+		})
+	}
+	wg.Wait()
+	return results
+}
+
+// exitCode maps a command's outcome to its exit code. A failed stdout write
+// exits 1 even when every profile succeeded: the result is incomplete.
+func exitCode(profileFailed bool, writeErr error, stderr io.Writer) int {
+	if writeErr != nil {
+		_, _ = fmt.Fprintf(stderr, "cpm: write output: %v\n", writeErr)
+		return 1
+	}
+	if profileFailed {
+		return 1
+	}
+	return 0
 }

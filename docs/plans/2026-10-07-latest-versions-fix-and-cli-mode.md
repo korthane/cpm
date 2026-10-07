@@ -150,7 +150,9 @@
   Flags and profile dirs may be interleaved. `--text` and `--json` together is
   a usage error. Profile dirs starting with `-` are still rejected (they are
   treated as unknown flags).
-- `outdated --text` (empty result → `all plugins up to date`):
+- `outdated --text` (empty result → `all plugins up to date`, unless a
+  profile failed to load: then stdout stays empty, since nothing proves the
+  failed profile's plugins are current):
   ```
   foo@acme  latest 0.35.1
     home      0.34.0
@@ -180,9 +182,11 @@
   `outdated` is always an array (`[]` when empty), never `null`. `refresh` is
   `"skipped"` (no `--refresh`, or the profile errored), `"ok"` or `"failed"`
   (stale catalog used).
-- `refresh --text`: one line per profile, `home  ok` or
-  `home  error: <msg>`. `--json`:
-  `{"profiles":[{"label","path","error"}]}`.
+- `refresh --text`: one stdout line per refreshed profile, `home  ok`; a
+  failed profile goes to stderr as `error: home: <msg>` (same as
+  `outdated`). `--json`: `{"profiles":[{"label","path","error"}]}`.
+- A failed stdout write (closed pipe, disk full) exits `1` with
+  `cpm: write output: <msg>` on stderr, in either format.
 - Plugins are listed in the same order as `BuildPluginMatrix` (marketplace,
   then name). Installs follow the profile order.
 
@@ -322,15 +326,26 @@ in Task 1.
 - Create: `internal/cli/refresh.go`
 - Create: `internal/cli/refresh_test.go`
 
-- [ ] write failing tests:
+- [x] write failing tests:
   - all profiles refreshed (one `plugin marketplace update` call per profile
     dir)
   - one profile failing → reported (stderr in text mode, JSON `error`), exit
     `1`
   - both formats
-- [ ] implement a parallel per-profile `claudecli.RefreshMarketplaces`, then
+- [x] implement a parallel per-profile `claudecli.RefreshMarketplaces`, then
   render text/JSON
-- [ ] run `make test` and `go test -race ./internal/cli/...` - must pass
+- [x] ➕ qualify `Run`'s doc comment: JSON mode keeps stderr empty for
+  command results and per-profile errors only; usage errors (including an
+  unknown command) stay plain stderr text. Table test for the unknown command
+  under both formats (exit `2`, exact stderr text)
+- [x] ➕ renderers return their stdout write error and the command exits `1`
+  when output could not be written completely (`outdated` and `refresh`,
+  text and JSON); failing-`io.Writer` tests for all four
+- [x] ➕ extract the shared parallel per-profile runner (`mapProfiles`) and
+  exit-code mapping (`exitCode`) into `cli.go`, used by both commands
+- [x] ➕ document in Technical Details that `outdated --text` prints nothing
+  to stdout when nothing is outdated but a profile failed to load
+- [x] run `make test` and `go test -race ./internal/cli/...` - must pass
   before next task
 
 ### Task 6: Wire command dispatch into `main`

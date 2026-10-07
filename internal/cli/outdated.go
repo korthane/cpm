@@ -1,23 +1,19 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
-	"sync"
 	"text/tabwriter"
-	"time"
 
 	"github.com/korthane/cpm/internal/claudecli"
 	"github.com/korthane/cpm/internal/config"
 	"github.com/korthane/cpm/internal/model"
 )
-
-// loadTimeout bounds each profile's load; it matches the UI's cmdTimeout.
-const loadTimeout = 2 * time.Minute
 
 // Refresh outcomes reported per profile by `outdated`.
 const (
@@ -62,39 +58,28 @@ func runOutdated(ctx context.Context, r claudecli.Runner,
 	loads := loadProfiles(ctx, r, profiles, opts.Refresh)
 	outdated := findOutdated(loads)
 
-	code := 0
-	if slices.ContainsFunc(loads, func(l profileLoad) bool { return l.err != nil }) {
-		code = 1
-	}
+	failed := slices.ContainsFunc(loads,
+		func(l profileLoad) bool { return l.err != nil })
+	var err error
 	if opts.Format == FormatJSON {
-		writeOutdatedJSON(stdout, loads, outdated, opts.Refresh)
-		return code
+		err = writeOutdatedJSON(stdout, loads, outdated, opts.Refresh)
+	} else {
+		err = writeOutdatedText(stdout, stderr, loads, outdated, opts.Refresh)
 	}
-	writeOutdatedText(stdout, stderr, loads, outdated, opts.Refresh)
-	return code
+	return exitCode(failed, err, stderr)
 }
 
-// loadProfiles loads every profile in parallel; results keep profile order.
-// Each goroutine owns its own config dir, so writes from --refresh never
-// overlap within this process.
 func loadProfiles(ctx context.Context, r claudecli.Runner,
 	profiles []config.Profile, refresh bool) []profileLoad {
-	loads := make([]profileLoad, len(profiles))
-	var wg sync.WaitGroup
-	for i, p := range profiles {
-		wg.Go(func() {
-			ctx, cancel := context.WithTimeout(ctx, loadTimeout)
-			defer cancel()
-			load := claudecli.LoadPluginsCached
-			if refresh {
-				load = claudecli.LoadPluginsFresh
-			}
-			data, latest, err := load(ctx, r, p.Path)
-			loads[i] = profileLoad{profile: p, data: data, latest: latest, err: err}
-		})
+	load := claudecli.LoadPluginsCached
+	if refresh {
+		load = claudecli.LoadPluginsFresh
 	}
-	wg.Wait()
-	return loads
+	return mapProfiles(ctx, profiles,
+		func(ctx context.Context, p config.Profile) profileLoad {
+			data, latest, err := load(ctx, r, p.Path)
+			return profileLoad{profile: p, data: data, latest: latest, err: err}
+		})
 }
 
 // findOutdated checks every installed entry rather than the matrix cells:
@@ -145,8 +130,10 @@ func profileLabel(p config.Profile) string {
 	return p.Path
 }
 
+// writeOutdatedText returns the stdout write error; stderr diagnostics are
+// best-effort.
 func writeOutdatedText(stdout, stderr io.Writer, loads []profileLoad,
-	outdated []outdatedPlugin, refresh bool) {
+	outdated []outdatedPlugin, refresh bool) error {
 	failed := false
 	for _, l := range loads {
 		label := profileLabel(l.profile)
@@ -164,11 +151,14 @@ func writeOutdatedText(stdout, stderr io.Writer, loads []profileLoad,
 	if len(outdated) == 0 {
 		// With a failed profile nothing proves its plugins are current.
 		if !failed {
-			_, _ = fmt.Fprintln(stdout, "all plugins up to date")
+			_, err := fmt.Fprintln(stdout, "all plugins up to date")
+			return err
 		}
-		return
+		return nil
 	}
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	// Render into memory so one Write reports any stdout failure.
+	var buf bytes.Buffer
+	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
 	for _, op := range outdated {
 		_, _ = fmt.Fprintf(tw, "%s  latest %s\n", op.id, op.latest)
 		for _, in := range op.installs {
@@ -180,6 +170,11 @@ func writeOutdatedText(stdout, stderr io.Writer, loads []profileLoad,
 		}
 	}
 	_ = tw.Flush()
+	if buf.Len() == 0 {
+		return nil
+	}
+	_, err := stdout.Write(buf.Bytes())
+	return err
 }
 
 func installMarkers(p claudecli.InstalledPlugin) string {
@@ -220,7 +215,7 @@ type installJSON struct {
 }
 
 func writeOutdatedJSON(stdout io.Writer, loads []profileLoad,
-	outdated []outdatedPlugin, refresh bool) {
+	outdated []outdatedPlugin, refresh bool) error {
 	// Non-nil slices: the documented shape promises arrays, never null.
 	doc := outdatedJSON{
 		Profiles: make([]profileJSON, 0, len(loads)),
@@ -254,5 +249,5 @@ func writeOutdatedJSON(stdout io.Writer, loads []profileLoad,
 		}
 		doc.Outdated = append(doc.Outdated, o)
 	}
-	_ = json.NewEncoder(stdout).Encode(doc)
+	return json.NewEncoder(stdout).Encode(doc)
 }

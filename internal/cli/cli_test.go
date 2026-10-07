@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/korthane/cpm/internal/claudecli"
+	"github.com/korthane/cpm/internal/config"
 )
 
 func TestIsCommand(t *testing.T) {
@@ -166,19 +167,67 @@ func TestRunOutdatedUsageMentionsRefreshFlag(t *testing.T) {
 	}
 }
 
+// Usage errors stay plain stderr text even in JSON mode.
 func TestRunUnknownCommandIsUsageError(t *testing.T) {
 	t.Parallel()
-	var stdout, stderr bytes.Buffer
-	opts := Options{Command: "update", Format: FormatText}
-	code := Run(context.Background(), &claudecli.FakeRunner{}, nil, opts,
-		&stdout, &stderr)
-	if code != 2 {
-		t.Errorf("exit code = %d, want 2", code)
+	for _, format := range []Format{FormatText, FormatJSON} {
+		t.Run(string(format), func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			opts := Options{Command: "update", Format: format}
+			code := Run(context.Background(), &claudecli.FakeRunner{}, nil, opts,
+				&stdout, &stderr)
+			if code != 2 {
+				t.Errorf("exit code = %d, want 2", code)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("stdout = %q, want empty", stdout.String())
+			}
+			if want := "cpm: unknown command \"update\"\n"; stderr.String() != want {
+				t.Errorf("stderr = %q, want %q", stderr.String(), want)
+			}
+		})
 	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want empty", stdout.String())
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("disk full")
+}
+
+// A lost result must not read as success, even when every profile loaded.
+func TestRunFailedStdoutWriteExitsOne(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		runner func() *claudecli.FakeRunner
+		opts   Options
+	}{
+		{"outdated text", mixedRunner,
+			Options{Command: "outdated", Format: FormatText}},
+		{"outdated text up to date", upToDateRunner,
+			Options{Command: "outdated", Format: FormatText}},
+		{"outdated json", mixedRunner,
+			Options{Command: "outdated", Format: FormatJSON}},
+		{"refresh text", func() *claudecli.FakeRunner { return refreshRunner() },
+			Options{Command: "refresh", Format: FormatText}},
+		{"refresh json", func() *claudecli.FakeRunner { return refreshRunner() },
+			Options{Command: "refresh", Format: FormatJSON}},
 	}
-	if !strings.Contains(stderr.String(), `unknown command "update"`) {
-		t.Errorf("stderr = %q, want unknown command", stderr.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stderr bytes.Buffer
+			code := Run(context.Background(), tt.runner(),
+				[]config.Profile{homeProfile}, tt.opts,
+				failingWriter{}, &stderr)
+			if code != 1 {
+				t.Errorf("exit code = %d, want 1", code)
+			}
+			if want := "cpm: write output: disk full\n"; stderr.String() != want {
+				t.Errorf("stderr = %q, want %q", stderr.String(), want)
+			}
+		})
 	}
 }
