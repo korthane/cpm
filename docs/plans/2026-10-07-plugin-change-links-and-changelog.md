@@ -337,14 +337,14 @@
 - Modify: `internal/model/matrix.go`
 - Modify: `internal/model/matrix_test.go`
 
-- [ ] write tests for `LatestSource`: picks the source of a profile whose
+- [x] write tests for `LatestSource`: picks the source of a profile whose
       version equals the merged latest; ignores profiles with an older
       version; tie between equal versions prefers non-stale, then profile
       order; none when no profile has one
-- [ ] write tests: `PluginCell.CommitSHA` set from the installed entry the
+- [x] write tests: `PluginCell.CommitSHA` set from the installed entry the
       cell represents (builder signatures unchanged)
-- [ ] implement `LatestSource` and `PluginCell.CommitSHA`
-- [ ] run tests - must pass before next task
+- [x] implement `LatestSource` and `PluginCell.CommitSHA`
+- [x] run tests - must pass before next task
 
 ### Task 6: Links in `cpm outdated` output
 

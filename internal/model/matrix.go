@@ -27,12 +27,14 @@ const (
 // Version is strictly behind the row's LatestVersion. Scope is the install
 // scope the CLI reported ("user", "project", "local"; empty when absent) — the
 // UI refuses actions on non-user scopes, which its `--scope user`-pinned CLI
-// calls cannot touch.
+// calls cannot touch. CommitSHA is the commit the shown install came from
+// (empty when unknown), the base of its change link.
 type PluginCell struct {
-	State    CellState
-	Version  string
-	Outdated bool
-	Scope    string
+	State     CellState
+	Version   string
+	Outdated  bool
+	Scope     string
+	CommitSHA string
 }
 
 // PluginRow is one comparison-table row: a plugin identity, its latest
@@ -73,10 +75,11 @@ func BuildPluginMatrix(perProfile []claudecli.PluginData, latest map[claudecli.P
 				state = Disabled
 			}
 			row.Cells[i] = PluginCell{
-				State:    state,
-				Version:  p.Version,
-				Outdated: IsOutdated(p.Version, row.LatestVersion),
-				Scope:    p.Scope,
+				State:     state,
+				Version:   p.Version,
+				Outdated:  IsOutdated(p.Version, row.LatestVersion),
+				Scope:     p.Scope,
+				CommitSHA: p.CommitSHA,
 			}
 		}
 	}
@@ -121,6 +124,33 @@ func MergeLatestVersions(perProfile []claudecli.LatestVersions) (map[claudecli.P
 		}
 	}
 	return latest, stale
+}
+
+// LatestSource returns where the merged latest version of a plugin lives:
+// the source of a profile whose own latest equals it (version compare), so
+// link and version agree. Among ties a non-stale profile wins, then the
+// earlier one. ok is false when latest is empty or no such profile has one.
+func LatestSource(perProfile []claudecli.LatestVersions, id claudecli.PluginID,
+	latest string) (claudecli.PluginSource, bool) {
+	if latest == "" {
+		return claudecli.PluginSource{}, false
+	}
+	var found claudecli.PluginSource
+	foundStale, ok := false, false
+	for _, lv := range perProfile {
+		v := lv.Versions[id]
+		if v == "" || compareVersions(v, latest) != 0 {
+			continue
+		}
+		src, has := lv.Sources[id]
+		if !has {
+			continue
+		}
+		if !ok || (foundStale && !lv.Stale) {
+			found, foundStale, ok = src, lv.Stale, true
+		}
+	}
+	return found, ok
 }
 
 // IsOutdated reports whether an installed version is strictly behind latest
