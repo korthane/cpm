@@ -246,7 +246,7 @@
 - Create: `internal/cli/cli.go`
 - Create: `internal/cli/cli_test.go`
 
-- [ ] write failing tests for `ParseArgs`:
+- [x] write failing tests for `ParseArgs`:
   - command name
   - interleaved flags and dirs
   - default `text` format, and `--json`
@@ -254,15 +254,15 @@
   - unknown flag → usage error
   - `--refresh` accepted only by `outdated`
   - `-h`/`--help` → `Help` set
-- [ ] write failing tests for `IsCommand` (known, unknown, empty string) and
+- [x] write failing tests for `IsCommand` (known, unknown, empty string) and
   for `Run`:
   - `Help` prints that command's usage and returns `0`
   - an unknown command returns `2`
-- [ ] implement `IsCommand`, `ParseArgs` returning
+- [x] implement `IsCommand`, `ParseArgs` returning
   `Options{Command, Format, Refresh, Help, Dirs}` (with a usage error type),
   the per-command usage text, and `Run(ctx, r, profiles, opts, stdout, stderr) int`
   dispatching to the command handlers
-- [ ] run `make test` - must pass before next task
+- [x] run `make test` - must pass before next task
 
 ### Task 4: `outdated` command
 
