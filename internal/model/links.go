@@ -2,7 +2,6 @@ package model
 
 import (
 	"net/url"
-	"path"
 	"regexp"
 	"strings"
 
@@ -84,40 +83,48 @@ func sameCommit(a, b string) bool {
 // data and the URL may reach the system opener, so each is validated.
 func ChangeLinks(src claudecli.PluginSource, installedSHA string) (compare, history string) {
 	base, ok := GitHubWebURL(src.RepoURL)
-	if !ok || !validCommit(src.Commit) {
+	latest := shortRef(src.Commit)
+	if !ok || !validCommit(latest) {
 		return "", ""
 	}
-	if validCommit(installedSHA) && !sameCommit(installedSHA, src.Commit) {
-		compare = base + "/compare/" + installedSHA + "..." + src.Commit
+	if validCommit(installedSHA) && !sameCommit(installedSHA, latest) {
+		compare = base + "/compare/" + installedSHA + "..." + latest
 	}
 	if p, ok := escapedRepoPath(src.Path); ok {
-		history = base + "/commits/" + src.Commit + "/" + p
+		history = base + "/commits/" + latest + "/" + p
 	}
 	return compare, history
+}
+
+// shortRef strips the refs/tags/ or refs/heads/ prefix a catalog may give,
+// leaving a name GitHub resolves on its own.
+func shortRef(ref string) string {
+	for _, prefix := range []string{"refs/tags/", "refs/heads/"} {
+		if name, ok := strings.CutPrefix(ref, prefix); ok {
+			return name
+		}
+	}
+	return ref
 }
 
 // escapedRepoPath cleans a repo-relative path and escapes each segment.
 // It refuses the repo root, absolute paths and any `..` segment.
 func escapedRepoPath(p string) (string, bool) {
-	for strings.HasPrefix(p, "./") {
-		p = strings.TrimPrefix(p, "./")
-	}
-	if p == "" || strings.HasPrefix(p, "/") {
+	if strings.HasPrefix(p, "/") {
 		return "", false
 	}
-	segments := strings.Split(p, "/")
-	for _, s := range segments {
-		if s == ".." {
+	var segments []string
+	for s := range strings.SplitSeq(p, "/") {
+		switch s {
+		case "", ".":
+			continue
+		case "..":
 			return "", false
 		}
+		segments = append(segments, url.PathEscape(s))
 	}
-	p = path.Clean(p)
-	if p == "." {
+	if len(segments) == 0 {
 		return "", false
-	}
-	segments = strings.Split(p, "/")
-	for i, s := range segments {
-		segments[i] = url.PathEscape(s)
 	}
 	return strings.Join(segments, "/"), true
 }

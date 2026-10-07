@@ -35,16 +35,15 @@ func TestFillCommitInfo(t *testing.T) {
 	fillCommitInfo(t.Context(), markets)
 
 	if markets[0].HeadSHA != "abc1234def567890abc1234def567890abc12345" ||
-		markets[0].CommitHash != "abc1234" ||
 		markets[0].CommitDate != "2026-06-28" {
-		t.Errorf("m1 = %+v, want full SHA, short abc1234, 2026-06-28",
+		t.Errorf("m1 = %+v, want full SHA and 2026-06-28",
 			markets[0])
 	}
-	if markets[1].HeadSHA != "" || markets[1].CommitHash != "" ||
+	if markets[1].HeadSHA != "" ||
 		markets[1].CommitDate != "" {
 		t.Errorf("no-location = %+v, want blank commit fields", markets[1])
 	}
-	if markets[2].HeadSHA != "" || markets[2].CommitHash != "" ||
+	if markets[2].HeadSHA != "" ||
 		markets[2].CommitDate != "" {
 		t.Errorf("broken = %+v, want blank commit fields on git failure", markets[2])
 	}

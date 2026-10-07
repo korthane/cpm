@@ -338,7 +338,7 @@ func TestStatusLineTruncatedToTerminalWidth(t *testing.T) {
 	m := modelWithCells(t, &claudecli.FakeRunner{}, installedFoo(true))
 	m.setStatus(strings.Repeat("boom ", 100), true)
 
-	if got := lipgloss.Width(m.statusLine()); got > m.width {
+	if got := lipgloss.Width(m.statusLine("")); got > m.width {
 		t.Errorf("status line is %d cells wide, want at most %d", got, m.width)
 	}
 }

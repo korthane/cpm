@@ -191,6 +191,29 @@ func TestChangeLinks(t *testing.T) {
 			installed: installed,
 		},
 		{
+			name:        "full tag ref shortened",
+			src:         src("acme/widgets", "refs/tags/v1.4.0", "plugins/widget"),
+			installed:   installed,
+			wantCompare: base + "/compare/" + installed + "...v1.4.0",
+			wantHistory: base + "/commits/v1.4.0/plugins/widget",
+		},
+		{
+			name:        "full branch ref shortened",
+			src:         src("acme/widgets", "refs/heads/main", "plugins/widget"),
+			wantHistory: base + "/commits/main/plugins/widget",
+		},
+		{
+			name:        "inner dot and empty segments cleaned",
+			src:         src("acme/widgets", latest, "plugins/./x//y/"),
+			wantHistory: base + "/commits/" + latest + "/plugins/x/y",
+		},
+		{
+			name:        "dot-only path is the root",
+			src:         src("acme/widgets", latest, "./././"),
+			installed:   installed,
+			wantCompare: base + "/compare/" + installed + "..." + latest,
+		},
+		{
 			name:      "ref with triple dot refused",
 			src:       src("acme/widgets", "a...b", "plugins/widget"),
 			installed: installed,

@@ -26,7 +26,7 @@ func ReadChangelog(src PluginSource) (text, file string, err error) {
 
 	candidates := []string{changelogName}
 	dir := path.Clean(filepath.ToSlash(src.Path))
-	if src.Path != "" && dir != "." {
+	if dir != "." {
 		candidates = []string{path.Join(dir, changelogName), changelogName}
 	}
 	for _, name := range candidates {

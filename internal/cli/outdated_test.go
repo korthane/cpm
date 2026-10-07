@@ -962,6 +962,42 @@ func TestOutdatedTextLinksQuoteControlCharacters(t *testing.T) {
 	}
 }
 
+// PathEscape already encodes control characters in built links; the text
+// writer still quotes them in case a link ever arrives unescaped.
+func TestOutdatedTextQuotesControlCharactersInLinks(t *testing.T) {
+	t.Parallel()
+	id := claudecli.PluginID{Name: "widget", Marketplace: "example-market"}
+	outdated := []outdatedPlugin{{
+		id: id, latest: "1.4.0",
+		installs: []outdatedInstall{{
+			profile: homeProfile,
+			plugin: claudecli.InstalledPlugin{ID: id, Version: "1.2.0",
+				Enabled: true, Scope: "user"},
+			compare: "https://github.com/acme/w\x1bidgets/compare/a...b",
+		}},
+		history: "https://github.com/acme/w\x1bidgets/commits/b",
+	}}
+	var out, errOut bytes.Buffer
+	err := writeOutdatedText(&out, &errOut,
+		profileLabels([]config.Profile{homeProfile}), nil, outdated,
+		false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.ContainsRune(got, '\x1b') {
+		t.Errorf("stdout carries a raw escape: %q", got)
+	}
+	for _, want := range []string{
+		`    changes: "https://github.com/acme/w\x1bidgets/compare/a...b"`,
+		`  history: "https://github.com/acme/w\x1bidgets/commits/b"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdout = %q, want quoted %s", got, want)
+		}
+	}
+}
+
 func TestOutdatedJSONChangeLinks(t *testing.T) {
 	t.Parallel()
 	loads := []profileLoad{
@@ -1191,6 +1227,21 @@ func TestOutdatedTextChangelogNothingToShow(t *testing.T) {
 				t.Errorf("stdout:\n%s\nwant:\n%s", got, want)
 			}
 		})
+	}
+}
+
+// A relative source whose clone could not be located (its profile's
+// marketplace list failed) reads like a remote one: nothing local to read.
+func TestOutdatedTextChangelogCloneNotLocated(t *testing.T) {
+	t.Parallel()
+	got := renderChangelogText(t, []profileLoad{
+		widgetLoad(homeProfile, "1.2.0", "", "1.4.0",
+			claudecli.PluginSource{Path: "./plugins/widget"}),
+	})
+	want := "widget@example-market  latest 1.4.0\n  home  1.2.0\n" +
+		"  changelog: no local changelog\n"
+	if got != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", got, want)
 	}
 }
 

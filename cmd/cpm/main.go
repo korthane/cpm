@@ -24,7 +24,7 @@ import (
 )
 
 const usage = `usage: cpm [<profile-dir> ...]
-       cpm outdated [--refresh] [--text|--json] [<profile-dir> ...]
+       cpm outdated [--refresh] [--changelog] [--text|--json] [<profile-dir> ...]
        cpm refresh [--text|--json] [<profile-dir> ...]
        cpm -h | --help | <command> --help
 
@@ -32,7 +32,8 @@ With no command, cpm starts the terminal UI. Commands print a result and
 exit:
 
   outdated   list installed plugins with a newer catalog version
-             (--refresh runs 'claude plugin marketplace update' first)
+             (--refresh runs 'claude plugin marketplace update' first;
+             --changelog adds CHANGELOG.md entries since the oldest install)
   refresh    run 'claude plugin marketplace update' in every profile
 
   --text     human-readable output (default)

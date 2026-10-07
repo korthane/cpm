@@ -635,24 +635,18 @@ func (m Model) toggleFold() Model {
 	if m.tab != tabPlugins || m.filters[tabPlugins] != "" {
 		return m
 	}
-	groups, _ := m.pluginGroups()
-	refs := m.visiblePluginRefs(groups)
-	if len(refs) == 0 {
-		return m
-	}
-	sel := min(m.selRow, len(refs)-1)
-	ref := refs[sel]
-	if ref.kind != rowMarketplace {
+	sel, ok := m.selectedPluginRef()
+	if !ok || sel.ref.kind != rowMarketplace {
 		return m
 	}
 	if m.folded == nil {
 		m.folded = map[string]bool{}
 	}
-	name := groups[ref.group].Marketplace.Name
+	name := sel.groups[sel.ref.group].Marketplace.Name
 	m.folded[name] = !m.folded[name]
 	// Only rows after the toggled header appear or disappear, so the clamped
 	// index still addresses that header.
-	m.selRow = sel
+	m.selRow = sel.index
 	return m
 }
 
@@ -816,17 +810,16 @@ var actionVerbs = map[string]string{
 // prompt first.
 func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 	verb := actionVerbs[key]
-	groups, _ := m.pluginGroups()
-	refs := m.visiblePluginRefs(groups)
-	if len(refs) == 0 {
+	sel, ok := m.selectedPluginRef()
+	if !ok {
 		return m, nil
 	}
-	ref := refs[min(m.selRow, len(refs)-1)]
 	// Marketplace header rows carry their own action set, not the plugin one.
-	if ref.kind == rowMarketplace {
-		return m.startMarketplaceAction(key, groups[ref.group].Marketplace)
+	if sel.ref.kind == rowMarketplace {
+		return m.startMarketplaceAction(key,
+			sel.groups[sel.ref.group].Marketplace)
 	}
-	row := groups[ref.group].Plugins[ref.plugin]
+	row := sel.groups[sel.ref.group].Plugins[sel.ref.plugin]
 	col := m.columns[m.selCol]
 	if col.status != statusLoaded {
 		m.setStatus(col.profile.Label+" is not loaded yet", true)
@@ -858,7 +851,8 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 	// profile; when it is missing and another profile knows a usable source,
 	// add the marketplace implicitly instead of refusing.
 	if verb == "install" && !hasAvailable(col.plugins, row.ID) {
-		return m.startInstallWithAdd(row.ID, groups[ref.group].Marketplace)
+		return m.startInstallWithAdd(row.ID,
+			sel.groups[sel.ref.group].Marketplace)
 	}
 	if verb == "uninstall" {
 		m.pending = &pendingAction{verb: verb, target: row.ID.String(), col: m.selCol}
@@ -1174,60 +1168,82 @@ func (m Model) View() string {
 		b.WriteString(m.viewMCP())
 	}
 
+	link := m.selectedChangeLink()
 	b.WriteString("\n")
-	b.WriteString(m.statusLine())
+	b.WriteString(m.statusLine(link))
+	// Help lines are width-capped like the status line: chromeLines budgets
+	// one row each, and a soft-wrapped hint would scroll the headers away.
 	// While the input is focused every other key types a literal rune, so the
 	// navigation, action and quit hints would all be lies.
 	if m.filterEditing {
-		b.WriteString("\nenter: apply  esc: clear\n")
+		b.WriteString("\n" + m.fitWidth("enter: apply  esc: clear") + "\n")
 		return b.String()
 	}
-	b.WriteString("\n←/→/h/l ↑/↓/j/k: select  tab: switch  /: filter  r: reload  q: quit")
+	nav := "←/→/h/l ↑/↓/j/k: select  tab: switch  /: filter  r: reload  q: quit"
 	if m.filters[m.tab] != "" {
-		b.WriteString("  esc: clear filter")
+		nav += "  esc: clear filter"
 	}
+	var actions string
 	switch {
 	case m.tab == tabMCP:
-		b.WriteString("\nx: remove")
+		actions = "x: remove"
 	case m.selectedMarketplaceRow():
-		b.WriteString("\ni: add  u: update  x: remove")
+		actions = "i: add  u: update  x: remove"
 		// Folding is disabled while a filter is applied (see toggleFold).
 		if m.filters[tabPlugins] == "" {
-			b.WriteString("  enter: fold")
+			actions += "  enter: fold"
 		}
 	default:
-		b.WriteString("\ne: enable  d: disable  u: update  x: uninstall  i: install")
-		if m.selectedChangeLink() != "" {
-			b.WriteString("  o: open changes")
+		actions = "e: enable  d: disable  u: update  x: uninstall  i: install"
+		// While a prompt is pending `o` answers it (as "no") instead.
+		if link != "" && m.pending == nil {
+			actions += "  o: open changes"
 		}
 	}
-	b.WriteString("\n")
+	b.WriteString("\n" + m.fitWidth(nav) + "\n" + m.fitWidth(actions) + "\n")
 	return b.String()
 }
 
 // selectedMarketplaceRow reports whether the plugins-tab selection sits on a
 // marketplace header row; the second footer help line follows the row kind.
 func (m Model) selectedMarketplaceRow() bool {
+	sel, ok := m.selectedPluginRef()
+	return ok && sel.ref.kind == rowMarketplace
+}
+
+// pluginSelection is the plugins-tab row under the selection: the filtered
+// groups the ref indexes into, and the selection clamped to the rows.
+type pluginSelection struct {
+	groups []model.PluginGroup
+	ref    rowRef
+	index  int
+}
+
+// selectedPluginRef resolves the selection against the filtered, folded
+// rows; ok is false when there are none.
+func (m Model) selectedPluginRef() (pluginSelection, bool) {
 	groups, _ := m.pluginGroups()
 	refs := m.visiblePluginRefs(groups)
 	if len(refs) == 0 {
-		return false
+		return pluginSelection{}, false
 	}
-	return refs[min(m.selRow, len(refs)-1)].kind == rowMarketplace
+	index := min(m.selRow, len(refs)-1)
+	return pluginSelection{groups: groups, ref: refs[index], index: index},
+		true
 }
 
 // statusLine renders the confirmation prompt when one is pending, otherwise
-// the transient status/error text, otherwise the selected cell's change link
-// (possibly empty). The text is capped at the terminal width: rowWindow
-// budgets exactly one row for this line, so letting a long CLI error
-// soft-wrap would push the header chrome off-screen.
-func (m Model) statusLine() string {
+// the transient status/error text, otherwise link, the selected cell's
+// change link (possibly empty). The text is capped at the terminal width:
+// rowWindow budgets exactly one row for this line, so letting a long CLI
+// error soft-wrap would push the header chrome off-screen.
+func (m Model) statusLine(link string) string {
 	if m.pending != nil {
 		return m.fitWidth(fmt.Sprintf("%s %s from %s? y/n", m.pending.verb,
 			m.pending.target, m.columns[m.pending.col].profile.Label))
 	}
 	if m.status == "" {
-		if link := m.selectedChangeLink(); link != "" {
+		if link != "" {
 			return statusStyle.Render(m.fitWidth("changes: " + link))
 		}
 		return ""
@@ -1284,16 +1300,11 @@ func (m Model) selectedChangeLink() string {
 	if m.tab != tabPlugins {
 		return ""
 	}
-	groups, _ := m.pluginGroups()
-	refs := m.visiblePluginRefs(groups)
-	if len(refs) == 0 {
+	sel, ok := m.selectedPluginRef()
+	if !ok || sel.ref.kind == rowMarketplace {
 		return ""
 	}
-	ref := refs[min(m.selRow, len(refs)-1)]
-	if ref.kind == rowMarketplace {
-		return ""
-	}
-	row := groups[ref.group].Plugins[ref.plugin]
+	row := sel.groups[sel.ref.group].Plugins[sel.ref.plugin]
 	cell := row.Cells[m.selCol]
 	if !cell.Outdated {
 		return ""

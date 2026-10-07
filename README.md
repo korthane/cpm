@@ -197,8 +197,11 @@ compare view from the installed commit to the latest one, or, when the
 installed commit is unknown, the plugin's commit history (see
 [Change links](#change-links)). `o` opens exactly that URL with the system
 opener (`open` on macOS, `xdg-open` elsewhere) and is listed in the help line
-only while a link is shown. A pending confirmation or a status message takes
-the status line first. cpm opens only `https://github.com/` URLs.
+whenever the selected cell has a link. A status message takes the status
+line first, hiding the link but not the key; a pending confirmation hides
+both, since any key but `y` answers it with "no". cpm
+opens only `https://github.com/` URLs; an opener still running after 5
+seconds (`xdg-open` may wait for the browser to exit) counts as success.
 
 Plugins tab, on a marketplace header row:
 
@@ -299,6 +302,9 @@ foo@acme  latest 0.35.1
     changes: https://github.com/acme/foo/compare/9a8b7c6...0f1e2d3
 ```
 
+(Commit SHAs are shortened in these samples; cpm prints them as recorded,
+usually in full.)
+
 Plugins are sorted by marketplace, then name; installs follow profile order.
 Profiles are shown by their config.yaml label, or by the directory name
 (e.g. `.claude-work`) when none is set; two profiles sharing a label are
@@ -342,12 +348,22 @@ Links are built offline from data already on disk:
   the catalog was fetched — so such links are exact only when both ends are
   pinned commits.
 - The latest commit is taken from the same profile that supplied the
-  latest version, so link and version always agree.
+  latest version, so link and version always agree. When several profiles
+  have it, one whose source names both a repository and a commit is
+  preferred, then one whose catalog refresh did not fail.
+- A `refs/tags/` or `refs/heads/` prefix on a `ref` is dropped; a ref with
+  any other `/` (e.g. `release/1.x`) gets no links.
 
 Only GitHub repositories get links. Marketplaces added from a local
 directory, clones without git, and repositories hosted anywhere else get
 none; neither do plugins whose version is a commit hash, since they are
 never reported outdated.
+
+Known limitation: the installed commit and the latest one are assumed to
+live in the same repository. If profiles point a same-named marketplace at
+different forks, or a plugin moved between its marketplace clone and a
+remote source, the compare link pairs commits from two repositories and
+GitHub shows an error page; the history link is unaffected.
 
 #### `--changelog`
 
@@ -372,18 +388,30 @@ foo@acme  latest 0.35.1
 The file is read from the local marketplace clone — the plugin's own
 directory first, then the clone root — and its path is shown in the header
 line. Version headings such as `## 1.2.0`, `## v1.2.0 - date`,
-`## [1.2.0]` and `## [1.2.0](link)` are recognized; in a changelog shared by
-several plugins, headings prefixed with the plugin name
-(`## foo v0.35.1`) select that plugin's sections only. Headings inside code
-blocks are ignored and long excerpts are cut at 200 lines. When there is
-nothing to show, a single line says why:
+`## [1.2.0]`, `## [1.2.0](link)`, `## Version 1.2.0` and `## Release 1.2.0`
+are recognized; in a changelog shared by several plugins, headings prefixed
+with the plugin name (`## foo v0.35.1`, or `## foo@acme v0.35.1`) select
+that plugin's sections only. Sections are shown newest first whatever the
+file's order, so an oldest-first changelog works too. Headings inside code
+blocks are ignored and long excerpts are cut at 200 lines.
+
+Known limitation: a plugin in a subdirectory without its own `CHANGELOG.md`
+falls back to the clone-root file. If that file versions something else
+with plain headings and one of them happens to equal the plugin's latest
+version, that entry is shown as the plugin's; the header line names the
+file, so the source stays visible.
+
+When there is nothing to show, a single line says why:
 
 - `changelog: no entry for 0.35.1` — the file has no heading for the latest
   version (it may track something else, e.g. the app rather than the
   plugin);
-- `changelog: no CHANGELOG.md` — the clone has none;
+- `changelog: no CHANGELOG.md` — the clone has no readable one (missing,
+  not a regular file, a link out of the clone, or over 1 MiB);
 - `changelog: no local changelog` — the plugin lives outside the
-  marketplace clone, so there is nothing local to read.
+  marketplace clone, or cpm could not locate the clone the latest version
+  came from (that profile's marketplace list failed, or no profile said
+  where the latest version lives), so there is nothing local to read.
 
 The changelog is informational and never changes the exit code. Only
 `outdated` accepts `--changelog`; `cpm refresh --changelog` is a usage
@@ -452,8 +480,10 @@ TUI or `claude` is working on the same profile.
 ### Streams and exit codes
 
 Results go to stdout. In text mode errors and warnings go to stderr, and a
-value holding control characters (a plugin ID, version, label or error
-message) is printed Go-quoted so it cannot forge lines. In JSON
+value holding control characters (a plugin ID, version, label, error
+message, link, changelog file name or changelog line) is printed Go-quoted
+so it cannot forge lines; tabs in changelog lines are expanded to four
+spaces instead, so indented Markdown stays readable. In JSON
 mode command results and per-profile errors are carried inside the JSON and
 stderr stays empty; usage errors, profile-resolution errors and a failed
 stdout write are still plain stderr text.

@@ -184,11 +184,12 @@
       changes: https://github.com/acme/widgets/compare/1a2b3c4...5d6e7f8
     work     1.3.1
       changes: https://github.com/acme/widgets/compare/9a8b7c6...5d6e7f8
-  history: https://github.com/acme/widgets/commits/5d6e7f8/plugins/widget
-  changelog (plugins/widget/CHANGELOG.md):
-    ## v1.4.0 - 2026-01-01
-    - …
+    history: https://github.com/acme/widgets/commits/5d6e7f8/plugins/widget
+    changelog (plugins/widget/CHANGELOG.md):
+      ## v1.4.0 - 2026-01-01
+      - …
   ```
+  (SHAs shortened here; real output prints them as recorded, usually full.)
   With `--changelog` and nothing to show, one of: `changelog: no entry for
   1.4.0`, `changelog: no CHANGELOG.md`, `changelog: no local changelog`
   (remote source); JSON gives `null` for all three. Informational only, exit

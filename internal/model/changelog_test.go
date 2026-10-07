@@ -318,8 +318,9 @@ func TestChangelogExcerptTruncates(t *testing.T) {
 	want := lines(append(body[:changelogMaxLines:changelogMaxLines],
 		"… (truncated)")...)
 	if got != want {
-		t.Errorf("got %d lines, want %d", strings.Count(got, "\n"),
-			strings.Count(want, "\n"))
+		t.Errorf("got %d lines, want %d\ngot tail: %q\nwant tail: %q",
+			strings.Count(got, "\n"), strings.Count(want, "\n"),
+			got[max(0, len(got)-60):], want[max(0, len(want)-60):])
 	}
 }
 
@@ -332,5 +333,72 @@ func TestChangelogExcerptExactlyAtCap(t *testing.T) {
 	got, ok := ChangelogExcerpt(lines(body...), "widget", "1.0.0", "2.0.0")
 	if !ok || got != lines(body...) {
 		t.Errorf("excerpt at the cap must not be truncated")
+	}
+}
+
+func TestChangelogExcerptHeadingForms(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, text, want string
+	}{
+		{
+			name: "version word is not a scope",
+			text: lines("## Version 2.0.0", "- two", "## Version 1.0.0"),
+			want: lines("## Version 2.0.0", "- two"),
+		},
+		{
+			name: "release word and v prefix",
+			text: lines("## Release v2.0.0", "- two", "## release 1.0.0"),
+			want: lines("## Release v2.0.0", "- two"),
+		},
+		{
+			name: "lone v before the version",
+			text: lines("## v 2.0.0", "- two", "## v 1.0.0"),
+			want: lines("## v 2.0.0", "- two"),
+		},
+		{
+			name: "scope with marketplace suffix",
+			text: lines("## widget@example-market 2.0.0", "- two",
+				"## helper@example-market 2.0.0", "- other",
+				"## widget@example-market 1.0.0"),
+			want: lines("## widget@example-market 2.0.0", "- two"),
+		},
+		{
+			name: "hashes then a lone space is not a heading",
+			text: lines("## 2.0.0", "- two", "## ", "#\t1.5.0", "- tab",
+				"## 1.0.0"),
+			want: lines("## 2.0.0", "- two", "## ", "#\t1.5.0", "- tab"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := ChangelogExcerpt(tt.text, "widget", "1.0.0", "2.0.0")
+			if !ok || got != tt.want {
+				t.Errorf("got (%q, %v), want (%q, true)", got, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestChangelogExcerptAscendingOrder(t *testing.T) {
+	t.Parallel()
+	text := lines("# Changelog", "## 1.0.0", "- one", "## 1.5.0",
+		"- one five", "## 2.0.0", "- two", "## 3.0.0", "- three")
+	got, ok := ChangelogExcerpt(text, "widget", "1.0.0", "2.0.0")
+	want := lines("## 2.0.0", "- two", "## 1.5.0", "- one five")
+	if !ok || got != want {
+		t.Errorf("got (%q, %v), want (%q, true)", got, ok, want)
+	}
+}
+
+func TestChangelogExcerptEmptyInstalledRunsToEOF(t *testing.T) {
+	t.Parallel()
+	text := lines("## 3.0.0", "- three", "## 2.0.0", "- two", "## 1.0.0",
+		"- one")
+	got, ok := ChangelogExcerpt(text, "widget", "", "2.0.0")
+	want := lines("## 2.0.0", "- two", "## 1.0.0", "- one")
+	if !ok || got != want {
+		t.Errorf("got (%q, %v), want (%q, true)", got, ok, want)
 	}
 }

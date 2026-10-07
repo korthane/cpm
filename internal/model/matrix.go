@@ -128,15 +128,16 @@ func MergeLatestVersions(perProfile []claudecli.LatestVersions) (map[claudecli.P
 
 // LatestSource returns where the merged latest version of a plugin lives:
 // the source of a profile whose own latest equals it (version compare), so
-// link and version agree. Among ties a non-stale profile wins, then the
-// earlier one. ok is false when latest is empty or no such profile has one.
+// link and version agree. Among ties a source with both repo and commit (one
+// that can build links) wins, then a non-stale profile, then the earlier
+// one. ok is false when latest is empty or no such profile has one.
 func LatestSource(perProfile []claudecli.LatestVersions, id claudecli.PluginID,
 	latest string) (claudecli.PluginSource, bool) {
 	if latest == "" {
 		return claudecli.PluginSource{}, false
 	}
 	var found claudecli.PluginSource
-	foundStale, ok := false, false
+	bestRank := -1
 	for _, lv := range perProfile {
 		v := lv.Versions[id]
 		if v == "" || compareVersions(v, latest) != 0 {
@@ -146,11 +147,18 @@ func LatestSource(perProfile []claudecli.LatestVersions, id claudecli.PluginID,
 		if !has {
 			continue
 		}
-		if !ok || (foundStale && !lv.Stale) {
-			found, foundStale, ok = src, lv.Stale, true
+		rank := 0
+		if src.RepoURL != "" && src.Commit != "" {
+			rank += 2
+		}
+		if !lv.Stale {
+			rank++
+		}
+		if rank > bestRank {
+			found, bestRank = src, rank
 		}
 	}
-	return found, ok
+	return found, bestRank >= 0
 }
 
 // IsOutdated reports whether an installed version is strictly behind latest

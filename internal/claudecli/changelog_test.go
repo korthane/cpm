@@ -46,6 +46,11 @@ func TestReadChangelog(t *testing.T) {
 			wantText: "## root\n", wantFile: "CHANGELOG.md",
 		},
 		{
+			name:     "empty path reads the root",
+			files:    map[string]string{"CHANGELOG.md": "## root\n"},
+			wantText: "## root\n", wantFile: "CHANGELOG.md",
+		},
+		{
 			name:     "path escaping the clone falls back to root",
 			files:    map[string]string{"CHANGELOG.md": "## root\n"},
 			path:     "../outside",
@@ -74,9 +79,22 @@ func TestReadChangelog(t *testing.T) {
 func TestReadChangelogNone(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "plugins", "widget", "README.md"), "x")
-	if _, _, err := ReadChangelog(PluginSource{
-		Path: "plugins/widget", CloneDir: dir}); err == nil {
-		t.Error("expected error when no CHANGELOG.md exists")
+	text, file, err := ReadChangelog(PluginSource{
+		Path: "plugins/widget", CloneDir: dir})
+	if err == nil || text != "" || file != "" {
+		t.Errorf("got (%q, %q, %v), want an error and nothing read",
+			text, file, err)
+	}
+}
+
+func TestReadChangelogMissingCloneDir(t *testing.T) {
+	text, file, err := ReadChangelog(PluginSource{
+		Path:     "plugins/widget",
+		CloneDir: filepath.Join(t.TempDir(), "gone"),
+	})
+	if err == nil || text != "" || file != "" {
+		t.Errorf("got (%q, %q, %v), want an error and nothing read",
+			text, file, err)
 	}
 }
 
@@ -106,9 +124,10 @@ func TestReadChangelogRefusesSymlinkOutOfClone(t *testing.T) {
 		}
 	}
 
-	text, _, err := ReadChangelog(PluginSource{
+	text, file, err := ReadChangelog(PluginSource{
 		Path: "plugins/widget", CloneDir: dir})
-	if err == nil {
-		t.Errorf("expected error, got text %q", text)
+	if err == nil || text != "" || file != "" {
+		t.Errorf("got (%q, %q, %v), want an error and nothing read",
+			text, file, err)
 	}
 }

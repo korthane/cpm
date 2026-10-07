@@ -34,7 +34,12 @@ behavior.
   with `MarketplacesUnknown` is `incomplete` (its own catalogs went unread,
   so its installs met only other profiles' catalogs): stderr error / JSON
   `"incomplete": true`, exit 1, no `all plugins up to date` claim; installs
-  found behind another profile's catalog are still listed.
+  found behind another profile's catalog are still listed. Links come from
+  `model.LatestSource` + `ChangeLinks`: history once per plugin, compare per
+  install from its `CommitSHA`; `--changelog`'s lower bound is the oldest
+  install (by `IsOutdated`). JSON `changelog` is three-state: absent without
+  the flag (`omitzero` + `changelogJSON.IsZero`), `null` when nothing was
+  found, else an object (`MarshalJSON` encodes the `found` pointer).
 - `cmd/cpm` — `launcher.run` routes `args[0]` that `cli.IsCommand` accepts to
   `cli.ParseArgs` (usage error → exit 2) + `resolveProfiles` + `cli.Run`,
   before the global `-h` scan so `cpm outdated --help` reaches command help;
@@ -63,7 +68,8 @@ behavior.
   points `HOME` at an empty temp dir: a default-profile (`""`) load reads
   `~/.claude/plugins/installed_plugins.json`, which must never be the
   developer's real file. The `ui` one also replaces `openURL` with a stub
-  that errors, so an unstubbed `o` test fails instead of opening a browser.
+  that counts calls and fails the whole run when any test reached it, so an
+  `o` press without `stubOpener` cannot pass silently or open a browser.
 - `LatestVersions.Sources` and `InstalledPlugin.CommitSHA` come from files
   and git, not from `FakeRunner`, so link and changelog tests in `cli` (a
   `package cli` test) build `[]profileLoad` values directly; changelog tests
@@ -117,43 +123,61 @@ behavior.
   (`PluginSource{RepoURL, Commit, Path, CloneDir}`). `setLatest` writes the
   version and the source of the *same* entry, so the source always follows
   whichever rule won the version (manifest / entry / ref); an empty version
-  drops the source. Relative sources always keep `Path` + `CloneDir` (the
+  records none. Relative sources always keep `Path` + `CloneDir` (the
   changelog needs no git) and set `RepoURL` + `Commit` (marketplace repo,
   clone HEAD = `Marketplace.HeadSHA`, full SHA from `%H %cs`) only as a
   pair. Remote sources carry their repo, `sha` (else `ref`, best-effort: a
-  branch can move) and `path`, no `CloneDir`.
+  branch can move) and `path`, no `CloneDir`. A relative source loaded while
+  the marketplace list failed has `Path` only (clone not locatable), so
+  `--changelog` reports it as `no local changelog`, like a remote one.
+  `Marketplace` keeps only the full `HeadSHA`; the 7-char form is cut in
+  `model.BuildPluginGroups` for display.
 - `model.LatestSource` picks the source of a profile whose own version
   equals the merged latest (version compare, not string equality), so link
-  and version agree; ties prefer a non-stale profile, then profile order.
+  and version agree; ties prefer a source with both `RepoURL` and `Commit`
+  (one that can build links), then a non-stale profile, then profile order.
   Matrix/group builders keep their signatures — the UI calls it for the
   selected row only.
 - Link parts are third-party data and the URL may reach the system opener,
   so `model/links.go` validates everything: host exactly `github.com`
   (case-insensitive; no other userinfo, port, query or fragment), owner/repo
   `[A-Za-z0-9._-]+` and not `.`/`..`, a commit is a hex SHA or slash-free
-  ref without `..` (a `/` would escape to `%2F`, dots break `a...b`). Path
-  segments allow any characters but are each `url.PathEscape`d (`%2e%2e`
-  cannot traverse); absolute paths and literal `..` segments are refused
-  before `path.Clean`; `.` (repo root) gives no history link. No compare
+  ref without `..` (a `/` would escape to `%2F`, dots break `a...b`);
+  a `refs/tags/` / `refs/heads/` prefix is stripped first. Path segments
+  allow any characters but are each `url.PathEscape`d (`%2e%2e` cannot
+  traverse); absolute paths and literal `..` segments are refused, empty and
+  `.` segments dropped; the repo root gives no history link. No compare
   link when installed and latest commits are the same (short SHA prefix
-  counts).
+  counts). Known limitation (README): both commits are assumed to be in the
+  same repo — a fork in another profile or a plugin moved between in-clone
+  and remote yields a compare link GitHub cannot resolve.
 - `ChangelogExcerpt` headings: ATX `#`–`###` (≤3 spaces indent, then a
   space) whose first word is a version (*plain*) or a name then a version
-  (*scoped*); `[1.2.0]` / `[1.2.0](link)` are unwrapped. *Every* version
+  (*scoped*; the name is cut at `@`, and `version`/`release`/`v` count as
+  plain); `[1.2.0]` / `[1.2.0](link)` are unwrapped. *Every* version
   heading ends the section above it, but only this plugin's are collected:
   scoped ones (name case-insensitive) if the file has any, else plain ones —
   so an interleaved multi-plugin file never leaks another plugin's body.
-  The excerpt starts at the collected heading equal to latest and stops at
-  the first one `<=` installed; newer headings met later are skipped. No
-  latest heading → `ok=false`. Lines inside ``` / ~~~ fences are never
+  Every collected section with version in (installed, latest] is taken,
+  regardless of file order, and sorted newest first (stable), so
+  oldest-first files work and truncation keeps the newest. No latest
+  heading → `ok=false`. `ReadChangelog` falls back to the clone-root file
+  for a subdirectory plugin; with plain headings that file may version
+  something else (README known limitation). Lines inside ``` / ~~~ fences are never
   headings; a ``` line whose info string contains a backtick is an inline
   code span, not a fence (CommonMark). Capped at 200 lines.
-- The TUI opener (`internal/ui/open.go`, injectable `openURL`) refuses any
-  URL not starting with `https://github.com/` — on macOS `open` also
-  launches files and apps — and runs `open`/`xdg-open` without a shell,
-  with a 5s timeout and stdio detached so it cannot draw over the screen.
-  The `changes:` status text renders in the existing status slot, so
-  `chromeLines` is unchanged.
+- The TUI opener (`internal/ui/open.go`: `openURL` is the only test hook,
+  `openWith` the testable core) refuses any URL not starting with
+  `https://github.com/` — on macOS `open` also launches files and apps —
+  and `Start`s `open`/`xdg-open` without a shell, stdio detached so it
+  cannot draw over the screen. It waits up to 5s for an exit status; an
+  opener still running then counts as success and is reaped in the
+  background (`xdg-open` may block until the browser exits; killing it
+  would report a failure for a page that opened). The `changes:` status
+  text renders in the existing status slot, so `chromeLines` is unchanged;
+  `View` computes the link once and width-caps both help lines, which
+  `chromeLines` budgets one row each. The `o: open changes` hint is hidden
+  while a confirmation is pending: `o` would answer the prompt.
 - `claude mcp list` has no `--json` mode and health-checks every server, so it
   is slow — hence the lazy MCP tab and tab-scoped reload. Its output includes
   project/local-scope servers (cwd-dependent) and plugin-provided servers

@@ -68,7 +68,7 @@ type outdatedPlugin struct {
 }
 
 // pluginChangelog is the changelog excerpt of one outdated plugin, or why
-// there is none: text is empty exactly when missing is set.
+// there is none: text and since are empty exactly when missing is set.
 type pluginChangelog struct {
 	file    string
 	since   string
@@ -95,17 +95,19 @@ func attachChangelogs(outdated []outdatedPlugin) {
 
 func readPluginChangelog(src claudecli.PluginSource,
 	plugin, since, latest string) *pluginChangelog {
+	// A remote source, or a relative one whose clone was never located
+	// because its profile's marketplace list failed.
 	if src.CloneDir == "" {
-		return &pluginChangelog{since: since, missing: "no local changelog"}
+		return &pluginChangelog{missing: "no local changelog"}
 	}
 	// Any read failure (absent, unreadable, refused) leaves nothing to show.
 	text, file, err := claudecli.ReadChangelog(src)
 	if err != nil {
-		return &pluginChangelog{since: since, missing: "no CHANGELOG.md"}
+		return &pluginChangelog{missing: "no CHANGELOG.md"}
 	}
 	excerpt, ok := model.ChangelogExcerpt(text, plugin, since, latest)
 	if !ok {
-		return &pluginChangelog{file: file, since: since,
+		return &pluginChangelog{file: file,
 			missing: "no entry for " + quoteControl(latest)}
 	}
 	return &pluginChangelog{file: file, since: since, text: excerpt}

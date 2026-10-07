@@ -256,7 +256,9 @@ func TestRunTopLevelHelpListsCommands(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d, want 0", code)
 	}
-	for _, want := range []string{"cpm outdated", "cpm refresh", "./outdated"} {
+	for _, want := range []string{
+		"cpm outdated", "cpm refresh", "./outdated", "--changelog",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("usage %q lacks %q", stdout, want)
 		}

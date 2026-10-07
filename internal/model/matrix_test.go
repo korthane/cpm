@@ -431,6 +431,16 @@ func TestLatestSource(t *testing.T) {
 			Stale:    stale,
 		}
 	}
+	// incomplete is a relative source whose git lookup failed: it has a
+	// clone to read but no repo or commit for links.
+	incomplete := func(stale bool) claudecli.LatestVersions {
+		return claudecli.LatestVersions{
+			Versions: map[claudecli.PluginID]string{p: "2.0.0"},
+			Sources: map[claudecli.PluginID]claudecli.PluginSource{
+				p: {Path: "plugins/p", CloneDir: "/clone"}},
+			Stale: stale,
+		}
+	}
 
 	tests := []struct {
 		name       string
@@ -473,6 +483,35 @@ func TestLatestSource(t *testing.T) {
 				lv("1.0.0", "old", false), lv("2.0.0", "stale", true),
 			},
 			latest: "2.0.0", want: "stale", wantOK: true,
+		},
+		{
+			name: "tie prefers a source that can build links",
+			perProfile: []claudecli.LatestVersions{
+				incomplete(false), lv("2.0.0", "second", false),
+			},
+			latest: "2.0.0", want: "second", wantOK: true,
+		},
+		{
+			name: "linkable stale source beats a fresh one without links",
+			perProfile: []claudecli.LatestVersions{
+				incomplete(false), lv("2.0.0", "stale", true),
+			},
+			latest: "2.0.0", want: "stale", wantOK: true,
+		},
+		{
+			name: "source without links still beats none",
+			perProfile: []claudecli.LatestVersions{
+				incomplete(false),
+			},
+			latest: "2.0.0", want: "", wantOK: true,
+		},
+		{
+			name: "profile without a source is skipped",
+			perProfile: []claudecli.LatestVersions{
+				{Versions: map[claudecli.PluginID]string{p: "2.0.0"}},
+				lv("2.0.0", "second", false),
+			},
+			latest: "2.0.0", want: "second", wantOK: true,
 		},
 		{
 			name: "no profile has the latest version",

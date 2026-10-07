@@ -25,11 +25,10 @@ type Marketplace struct {
 	URL             string `json:"url"`
 	Path            string `json:"path"`
 	InstallLocation string `json:"installLocation"`
-	// HeadSHA, CommitHash (its short form) and CommitDate (YYYY-MM-DD) of
-	// the marketplace clone are filled by the loader via git; marketplaces
-	// have no version field, so this is the only freshness signal.
+	// HeadSHA and CommitDate (YYYY-MM-DD) of the marketplace clone are
+	// filled by the loader via git; marketplaces have no version field, so
+	// this is the only freshness signal.
 	HeadSHA    string `json:"-"`
-	CommitHash string `json:"-"`
 	CommitDate string `json:"-"`
 }
 
@@ -176,11 +175,9 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 func (lv *LatestVersions) setLatest(id PluginID, version string,
 	src PluginSource) {
 	lv.Versions[id] = version
-	if version == "" {
-		delete(lv.Sources, id)
-		return
+	if version != "" {
+		lv.Sources[id] = src
 	}
-	lv.Sources[id] = src
 }
 
 // pluginSource describes where a catalog entry's plugin lives. A relative

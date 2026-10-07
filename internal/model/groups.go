@@ -7,6 +7,9 @@ import (
 	"github.com/korthane/cpm/internal/claudecli"
 )
 
+// shortHashLen is the displayed hash length, git's usual abbreviation.
+const shortHashLen = 7
+
 // MarketplaceCell is one profile's state for a marketplace row. Commit info
 // is empty when the loader's git lookup failed or the marketplace is not
 // configured in that profile.
@@ -69,7 +72,7 @@ func BuildPluginGroups(perProfile []claudecli.PluginData, latest map[claudecli.P
 			row := ensure(mkt.Name)
 			row.Cells[i] = MarketplaceCell{
 				Configured: true,
-				CommitHash: mkt.CommitHash,
+				CommitHash: mkt.HeadSHA[:min(shortHashLen, len(mkt.HeadSHA))],
 				CommitDate: mkt.CommitDate,
 				Local:      mkt.Source == "directory",
 			}

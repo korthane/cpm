@@ -11,8 +11,8 @@ func TestParsePluginID(t *testing.T) {
 		id   string
 		want PluginID
 	}{
-		{"ralphex@ralphex", PluginID{Name: "ralphex", Marketplace: "ralphex"}},
-		{"clangd-lsp@claude-plugins-official", PluginID{Name: "clangd-lsp", Marketplace: "claude-plugins-official"}},
+		{"widget@widget", PluginID{Name: "widget", Marketplace: "widget"}},
+		{"alpha-lsp@example-market", PluginID{Name: "alpha-lsp", Marketplace: "example-market"}},
 		{"no-marketplace", PluginID{Name: "no-marketplace"}},
 		{"", PluginID{}},
 	}
@@ -24,9 +24,9 @@ func TestParsePluginID(t *testing.T) {
 }
 
 func TestPluginIDString(t *testing.T) {
-	id := PluginID{Name: "ralphex", Marketplace: "ralphex"}
-	if got := id.String(); got != "ralphex@ralphex" {
-		t.Errorf("String() = %q, want %q", got, "ralphex@ralphex")
+	id := PluginID{Name: "widget", Marketplace: "widget"}
+	if got := id.String(); got != "widget@widget" {
+		t.Errorf("String() = %q, want %q", got, "widget@widget")
 	}
 	bare := PluginID{Name: "solo"}
 	if got := bare.String(); got != "solo" {
@@ -41,21 +41,21 @@ func TestLoadPluginsFixture(t *testing.T) {
 		},
 	}
 
-	got, err := LoadPlugins(t.Context(), f, "/home/u/.claude")
+	got, _, err := loadPlugins(t.Context(), f, "/home/u/.claude")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	wantInstalled := []InstalledPlugin{
-		{ID: PluginID{Name: "clangd-lsp", Marketplace: "claude-plugins-official"}, Version: "1.0.0", Enabled: true, Scope: "user",
-			InstallPath: "/Users/u/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0"},
+		{ID: PluginID{Name: "alpha-lsp", Marketplace: "example-market"}, Version: "1.0.0", Enabled: true, Scope: "user",
+			InstallPath: "/Users/u/.claude/plugins/cache/example-market/alpha-lsp/1.0.0"},
 		// version "unknown" is normalized to empty.
-		{ID: PluginID{Name: "feature-dev", Marketplace: "claude-plugins-official"}, Version: "", Enabled: true, Scope: "user",
-			InstallPath: "/Users/u/.claude/plugins/cache/claude-plugins-official/feature-dev/unknown"},
-		{ID: PluginID{Name: "ralphex", Marketplace: "ralphex"}, Version: "0.17.0", Enabled: true, Scope: "user",
-			InstallPath: "/Users/u/.claude/plugins/cache/ralphex/ralphex/0.17.0"},
-		{ID: PluginID{Name: "superpowers", Marketplace: "claude-plugins-official"}, Version: "6.1.0", Enabled: true, Scope: "user",
-			InstallPath: "/Users/u/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.0"},
+		{ID: PluginID{Name: "beta-dev", Marketplace: "example-market"}, Version: "", Enabled: true, Scope: "user",
+			InstallPath: "/Users/u/.claude/plugins/cache/example-market/beta-dev/unknown"},
+		{ID: PluginID{Name: "widget", Marketplace: "widget"}, Version: "0.17.0", Enabled: true, Scope: "user",
+			InstallPath: "/Users/u/.claude/plugins/cache/widget/widget/0.17.0"},
+		{ID: PluginID{Name: "gamma-tools", Marketplace: "example-market"}, Version: "6.1.0", Enabled: true, Scope: "user",
+			InstallPath: "/Users/u/.claude/plugins/cache/example-market/gamma-tools/6.1.0"},
 	}
 	if len(got.Installed) != len(wantInstalled) {
 		t.Fatalf("Installed len = %d, want %d", len(got.Installed), len(wantInstalled))
@@ -68,15 +68,15 @@ func TestLoadPluginsFixture(t *testing.T) {
 
 	wantAvailable := []AvailablePlugin{
 		// git-subdir source with a version tag ref.
-		{ID: PluginID{Name: "42crunch-api-security-testing", Marketplace: "claude-plugins-official"}, LatestVersion: "v1.5.5"},
+		{ID: PluginID{Name: "delta-security", Marketplace: "example-market"}, LatestVersion: "v1.5.5"},
 		// git-subdir source whose ref is a branch name, not a version.
-		{ID: PluginID{Name: "adobe-for-creativity", Marketplace: "claude-plugins-official"}, LatestVersion: ""},
+		{ID: PluginID{Name: "epsilon-creative", Marketplace: "example-market"}, LatestVersion: ""},
 		// url source without a ref.
-		{ID: PluginID{Name: "agentforce-adlc", Marketplace: "claude-plugins-official"}, LatestVersion: ""},
+		{ID: PluginID{Name: "zeta-agents", Marketplace: "example-market"}, LatestVersion: ""},
 		// string source with a top-level version field.
-		{ID: PluginID{Name: "csharp-lsp", Marketplace: "claude-plugins-official"}, LatestVersion: "1.0.0"},
+		{ID: PluginID{Name: "eta-lsp", Marketplace: "example-market"}, LatestVersion: "1.0.0"},
 		// github source without a ref.
-		{ID: PluginID{Name: "fullstory", Marketplace: "claude-plugins-official"}, LatestVersion: ""},
+		{ID: PluginID{Name: "theta", Marketplace: "example-market"}, LatestVersion: ""},
 	}
 	if len(got.Available) != len(wantAvailable) {
 		t.Fatalf("Available len = %d, want %d", len(got.Available), len(wantAvailable))
@@ -95,7 +95,7 @@ func TestLoadPluginsStringSourceWithoutVersion(t *testing.T) {
 		"available": [{"pluginId": "x@m", "source": "./x"}]
 	}`)}}
 
-	got, err := LoadPlugins(t.Context(), f, "")
+	got, _, err := loadPlugins(t.Context(), f, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,16 +134,16 @@ func TestIsVersionRef(t *testing.T) {
 
 func TestLoadPluginsDisabledPlugin(t *testing.T) {
 	f := &FakeRunner{Default: FakeResponse{Stdout: []byte(`{
-		"installed": [{"id": "dotfiles@olomix-cc-thingz", "version": "0.1.1", "enabled": false}],
+		"installed": [{"id": "dotfiles@local-thingz", "version": "0.1.1", "enabled": false}],
 		"available": []
 	}`)}}
 
-	got, err := LoadPlugins(t.Context(), f, "")
+	got, _, err := loadPlugins(t.Context(), f, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := InstalledPlugin{
-		ID:      PluginID{Name: "dotfiles", Marketplace: "olomix-cc-thingz"},
+		ID:      PluginID{Name: "dotfiles", Marketplace: "local-thingz"},
 		Version: "0.1.1",
 		Enabled: false,
 	}
@@ -188,7 +188,7 @@ func TestLoadPluginsEdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &FakeRunner{Default: FakeResponse{Stdout: tt.stdout, Err: tt.runErr}}
 
-			got, err := LoadPlugins(t.Context(), f, "")
+			got, _, err := loadPlugins(t.Context(), f, "")
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -208,7 +208,7 @@ func TestLoadPluginsEdgeCases(t *testing.T) {
 func TestLoadPluginsInvokesCorrectCommand(t *testing.T) {
 	f := &FakeRunner{Default: FakeResponse{Stdout: []byte(`{}`)}}
 
-	if _, err := LoadPlugins(t.Context(), f, "/tmp/profile-y"); err != nil {
+	if _, _, err := loadPlugins(t.Context(), f, "/tmp/profile-y"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestLoadPluginsPropagatesRunError(t *testing.T) {
 	wantErr := &RunError{Args: []string{"plugin", "list", "--available", "--json"}, Err: errors.New("exit status 1")}
 	f := &FakeRunner{Default: FakeResponse{Err: wantErr}}
 
-	_, err := LoadPlugins(t.Context(), f, "")
+	_, _, err := loadPlugins(t.Context(), f, "")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v, want %v", err, wantErr)
 	}

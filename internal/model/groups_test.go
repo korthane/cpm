@@ -61,7 +61,7 @@ func TestBuildPluginGroupsMarketplaceCells(t *testing.T) {
 			Name:       "m",
 			Source:     "github",
 			Repo:       "owner/m",
-			CommitHash: "a1b2c3",
+			HeadSHA:    "a1b2c3d4e5f6",
 			CommitDate: "2026-06-28",
 		}}},
 		{Marketplaces: []claudecli.Marketplace{{
@@ -79,7 +79,7 @@ func TestBuildPluginGroupsMarketplaceCells(t *testing.T) {
 		t.Fatalf("got %d groups, want 1", len(groups))
 	}
 	wantCells := []MarketplaceCell{
-		{Configured: true, CommitHash: "a1b2c3", CommitDate: "2026-06-28"},
+		{Configured: true, CommitHash: "a1b2c3d", CommitDate: "2026-06-28"},
 		{Configured: true},
 		{},
 	}

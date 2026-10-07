@@ -101,14 +101,9 @@ type pluginListJSON struct {
 	Available []availableJSON `json:"available"`
 }
 
-// LoadPlugins fetches and parses installed + available plugins for one profile.
-func LoadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, error) {
-	data, _, err := loadPlugins(ctx, r, profileDir)
-	return data, err
-}
-
-// loadPlugins is LoadPlugins plus each available entry's raw `source`,
-// index-aligned with PluginData.Available.
+// loadPlugins fetches and parses installed + available plugins for one
+// profile, plus each available entry's raw `source`, index-aligned with
+// PluginData.Available.
 func loadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, []json.RawMessage, error) {
 	out, err := r.Run(ctx, profileDir, "plugin", "list", "--available", "--json")
 	if err != nil {

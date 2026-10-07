@@ -1,100 +1,100 @@
 {
   "installed": [
     {
-      "id": "clangd-lsp@claude-plugins-official",
+      "id": "alpha-lsp@example-market",
       "version": "1.0.0",
       "scope": "user",
       "enabled": true,
-      "installPath": "/Users/u/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0",
+      "installPath": "/Users/u/.claude/plugins/cache/example-market/alpha-lsp/1.0.0",
       "installedAt": "2025-12-30T11:21:59.179Z",
       "lastUpdated": "2025-12-30T11:21:59.179Z"
     },
     {
-      "id": "feature-dev@claude-plugins-official",
+      "id": "beta-dev@example-market",
       "version": "unknown",
       "scope": "user",
       "enabled": true,
-      "installPath": "/Users/u/.claude/plugins/cache/claude-plugins-official/feature-dev/unknown",
+      "installPath": "/Users/u/.claude/plugins/cache/example-market/beta-dev/unknown",
       "installedAt": "2025-12-17T08:37:23.048Z",
       "lastUpdated": "2026-07-01T19:26:18.376Z"
     },
     {
-      "id": "ralphex@ralphex",
+      "id": "widget@widget",
       "version": "0.17.0",
       "scope": "user",
       "enabled": true,
-      "installPath": "/Users/u/.claude/plugins/cache/ralphex/ralphex/0.17.0",
+      "installPath": "/Users/u/.claude/plugins/cache/widget/widget/0.17.0",
       "installedAt": "2026-03-04T11:10:36.468Z",
       "lastUpdated": "2026-03-04T11:10:36.468Z"
     },
     {
-      "id": "superpowers@claude-plugins-official",
+      "id": "gamma-tools@example-market",
       "version": "6.1.0",
       "scope": "user",
       "enabled": true,
-      "installPath": "/Users/u/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.0",
+      "installPath": "/Users/u/.claude/plugins/cache/example-market/gamma-tools/6.1.0",
       "installedAt": "2026-03-16T18:29:44.170Z",
       "lastUpdated": "2026-07-01T06:57:51.089Z"
     }
   ],
   "available": [
     {
-      "pluginId": "42crunch-api-security-testing@claude-plugins-official",
-      "name": "42crunch-api-security-testing",
-      "description": "Automate API security directly in Claude Code with 42Crunch - automatically audit OpenAPI specs, detect vulnerabilities aligned with OWASP API Security risks (including BOLA/BFLA), and apply AI-powered fixes. Designed for AI-assisted development workflows, it provides continuous guardrails through an audit->scan->remediate->validate loop, ensuring APIs meet enterprise security standards before deployment.",
-      "marketplaceName": "claude-plugins-official",
+      "pluginId": "delta-security@example-market",
+      "name": "delta-security",
+      "description": "Audit API specs for security issues.",
+      "marketplaceName": "example-market",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/42Crunch-AI/claude-plugins.git",
-        "path": "plugins/api-security-testing",
+        "url": "https://github.com/acme/delta-plugins.git",
+        "path": "plugins/delta-security",
         "ref": "v1.5.5",
         "sha": "0f325999a7106eadb2d0ecbcccabf6c12dc06aef"
       },
       "installCount": 1436
     },
     {
-      "pluginId": "adobe-for-creativity@claude-plugins-official",
-      "name": "adobe-for-creativity",
-      "description": "Harness Adobe's creative AI-powered tools to edit images, automate design workflows, and bring creative visions to life \u2014 from background removal to vectorization and professional retouching.",
-      "marketplaceName": "claude-plugins-official",
+      "pluginId": "epsilon-creative@example-market",
+      "name": "epsilon-creative",
+      "description": "Edit images and automate design workflows \u2014 an example entry.",
+      "marketplaceName": "example-market",
       "source": {
         "source": "git-subdir",
-        "url": "https://github.com/adobe/skills.git",
-        "path": "plugins/creative-cloud/adobe-for-creativity",
+        "url": "https://github.com/acme/epsilon-skills.git",
+        "path": "plugins/creative/epsilon-creative",
         "ref": "main",
         "sha": "17ef6fb53d2eb23158dec11823ff569258b7a26e"
       },
       "installCount": 2061
     },
     {
-      "pluginId": "agentforce-adlc@claude-plugins-official",
-      "name": "agentforce-adlc",
-      "description": "Agentforce Agent Development Life Cycle \u2014 author, discover, scaffold, deploy, test, and optimize .agent files",
-      "marketplaceName": "claude-plugins-official",
+      "pluginId": "zeta-agents@example-market",
+      "name": "zeta-agents",
+      "description": "Agent life cycle tools \u2014 author, test and deploy agent files",
+      "marketplaceName": "example-market",
       "source": {
         "source": "url",
-        "url": "https://github.com/SalesforceAIResearch/agentforce-adlc.git",
+        "url": "https://github.com/acme/zeta-agents.git",
         "sha": "f17012bd8b6e7f6b140d60a825aa4277d8c05f07"
       },
       "installCount": 853
     },
     {
-      "pluginId": "csharp-lsp@claude-plugins-official",
-      "name": "csharp-lsp",
-      "description": "C# language server for code intelligence",
-      "marketplaceName": "claude-plugins-official",
+      "pluginId": "eta-lsp@example-market",
+      "name": "eta-lsp",
+      "description": "Example language server for code intelligence",
+      "marketplaceName": "example-market",
       "version": "1.0.0",
-      "source": "./plugins/csharp-lsp",
+      "source": "./plugins/eta-lsp",
       "installCount": 40209
     },
     {
-      "pluginId": "fullstory@claude-plugins-official",
-      "name": "fullstory",
-      "description": "Connect Claude to Fullstory to query behavioral analytics, session replays, and customer experience insights.",
-      "marketplaceName": "claude-plugins-official",
+      "pluginId": "theta@example-market",
+      "name": "theta",
+      "description": "Query analytics and session replays.",
+      "marketplaceName": "example-market",
       "source": {
         "source": "github",
-        "repo": "fullstorydev/fullstory-skills",
+        "repo": "acme/theta-skills",
         "sha": "b20614e2d08d7a7c70775bb62b5af640f60b024b"
       },
       "installCount": 219

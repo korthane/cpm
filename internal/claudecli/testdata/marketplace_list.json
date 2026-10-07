@@ -1,26 +1,26 @@
 [
   {
-    "name": "claude-plugins-official",
+    "name": "example-market",
     "source": "github",
-    "repo": "anthropics/claude-plugins-official",
-    "installLocation": "/Users/u/.claude/plugins/marketplaces/claude-plugins-official"
+    "repo": "acme/example-market",
+    "installLocation": "/Users/u/.claude/plugins/marketplaces/example-market"
   },
   {
-    "name": "elastic-agent-skills",
+    "name": "example-skills",
     "source": "git",
-    "url": "https://github.com/elastic/agent-skills.git",
-    "installLocation": "/Users/u/.claude/plugins/marketplaces/elastic-agent-skills"
+    "url": "https://github.com/acme/agent-skills.git",
+    "installLocation": "/Users/u/.claude/plugins/marketplaces/example-skills"
   },
   {
-    "name": "olomix-cc-thingz",
+    "name": "local-thingz",
     "source": "directory",
-    "path": "/Users/u/src/github.com/olomix/cc-thingz",
-    "installLocation": "/Users/u/src/github.com/olomix/cc-thingz"
+    "path": "/Users/u/src/local-thingz",
+    "installLocation": "/Users/u/src/local-thingz"
   },
   {
-    "name": "ralphex",
+    "name": "widget",
     "source": "github",
-    "repo": "umputun/ralphex",
-    "installLocation": "/Users/u/.claude/plugins/marketplaces/ralphex"
+    "repo": "acme/widget",
+    "installLocation": "/Users/u/.claude/plugins/marketplaces/widget"
   }
 ]

@@ -2,6 +2,7 @@ package model
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -21,26 +22,23 @@ type versionHeading struct {
 	version string
 }
 
-// ChangelogExcerpt returns the sections of a CHANGELOG.md text from the
-// heading for latest (inclusive) down to the first heading at or below
-// installed (exclusive), or to EOF. When any heading is scoped to plugin
-// (`## <plugin> 1.2.0`) only scoped sections are collected, else only plain
-// ones; every version heading still ends the section above it. ok is false
-// when no collected heading matches latest. The result ends in a newline and
-// is capped at changelogMaxLines lines plus a truncation marker.
+// ChangelogExcerpt returns the sections of a CHANGELOG.md text whose
+// version lies in (installed, latest], newest first whatever the file's
+// order; an empty installed takes every version up to latest. When any
+// heading is scoped to plugin (`## <plugin> 1.2.0`) only scoped sections are
+// collected, else only plain ones; every version heading still ends the
+// section above it. ok is false when no collected heading matches latest.
+// The result ends in a newline and is capped at changelogMaxLines lines plus
+// a truncation marker.
 func ChangelogExcerpt(text, plugin, installed, latest string) (string, bool) {
 	if latest == "" {
 		return "", false
 	}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	headings := findVersionHeadings(lines)
-	scoped := false
-	for _, h := range headings {
-		if strings.EqualFold(h.scope, plugin) {
-			scoped = true
-			break
-		}
-	}
+	scoped := slices.ContainsFunc(headings, func(h versionHeading) bool {
+		return strings.EqualFold(h.scope, plugin)
+	})
 	owns := func(h versionHeading) bool {
 		if scoped {
 			return strings.EqualFold(h.scope, plugin)
@@ -48,33 +46,36 @@ func ChangelogExcerpt(text, plugin, installed, latest string) (string, bool) {
 		return h.scope == ""
 	}
 
-	var out []string
-	started := false
+	type section struct {
+		version string
+		lines   []string
+	}
+	var sections []section
+	found := false
 	for i, h := range headings {
-		if !owns(h) {
+		if !owns(h) || compareVersions(h.version, latest) > 0 {
 			continue
-		}
-		c := compareVersions(h.version, latest)
-		if !started {
-			if c != 0 {
-				continue
-			}
-			started = true
 		}
 		if installed != "" && compareVersions(h.version, installed) <= 0 {
-			break
-		}
-		if c > 0 {
 			continue
 		}
+		found = found || compareVersions(h.version, latest) == 0
 		end := len(lines)
 		if i+1 < len(headings) {
 			end = headings[i+1].line
 		}
-		out = append(out, lines[h.line:end]...)
+		sections = append(sections, section{h.version, lines[h.line:end]})
 	}
-	if !started {
+	if !found {
 		return "", false
+	}
+	// Stable, so a newest-first file keeps its own order.
+	slices.SortStableFunc(sections, func(a, b section) int {
+		return compareVersions(b.version, a.version)
+	})
+	var out []string
+	for _, s := range sections {
+		out = append(out, s.lines...)
 	}
 	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
 		out = out[:len(out)-1]
@@ -149,7 +150,9 @@ func isFenceClose(line, fence string) bool {
 }
 
 // parseVersionHeading recognizes `#`–`###` + space, then a version or a
-// name followed by a version; `[1.2.0]` and `[1.2.0](link)` are unwrapped.
+// word followed by a version; `[1.2.0]` and `[1.2.0](link)` are unwrapped.
+// The word is the scope, cut at `@` so `widget@market` scopes to widget;
+// "version", "release" and "v" are not scopes.
 func parseVersionHeading(line string) (versionHeading, bool) {
 	hashes := len(line) - len(strings.TrimLeft(line, "#"))
 	if hashes < 1 || hashes > 3 || len(line) == hashes {
@@ -167,10 +170,20 @@ func parseVersionHeading(line string) (versionHeading, bool) {
 	}
 	if len(words) > 1 {
 		if v := unwrapVersion(words[1]); headingVersion.MatchString(v) {
-			return versionHeading{scope: words[0], version: v}, true
+			return versionHeading{scope: headingScope(words[0]), version: v},
+				true
 		}
 	}
 	return versionHeading{}, false
+}
+
+func headingScope(word string) string {
+	switch strings.ToLower(word) {
+	case "version", "release", "v":
+		return ""
+	}
+	scope, _, _ := strings.Cut(word, "@")
+	return scope
 }
 
 func unwrapVersion(word string) string {

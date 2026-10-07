@@ -24,28 +24,28 @@ func TestListMarketplacesFixture(t *testing.T) {
 
 	want := []Marketplace{
 		{
-			Name:            "claude-plugins-official",
+			Name:            "example-market",
 			Source:          "github",
-			Repo:            "anthropics/claude-plugins-official",
-			InstallLocation: "/Users/u/.claude/plugins/marketplaces/claude-plugins-official",
+			Repo:            "acme/example-market",
+			InstallLocation: "/Users/u/.claude/plugins/marketplaces/example-market",
 		},
 		{
-			Name:            "elastic-agent-skills",
+			Name:            "example-skills",
 			Source:          "git",
-			URL:             "https://github.com/elastic/agent-skills.git",
-			InstallLocation: "/Users/u/.claude/plugins/marketplaces/elastic-agent-skills",
+			URL:             "https://github.com/acme/agent-skills.git",
+			InstallLocation: "/Users/u/.claude/plugins/marketplaces/example-skills",
 		},
 		{
-			Name:            "olomix-cc-thingz",
+			Name:            "local-thingz",
 			Source:          "directory",
-			Path:            "/Users/u/src/github.com/olomix/cc-thingz",
-			InstallLocation: "/Users/u/src/github.com/olomix/cc-thingz",
+			Path:            "/Users/u/src/local-thingz",
+			InstallLocation: "/Users/u/src/local-thingz",
 		},
 		{
-			Name:            "ralphex",
+			Name:            "widget",
 			Source:          "github",
-			Repo:            "umputun/ralphex",
-			InstallLocation: "/Users/u/.claude/plugins/marketplaces/ralphex",
+			Repo:            "acme/widget",
+			InstallLocation: "/Users/u/.claude/plugins/marketplaces/widget",
 		},
 	}
 	if len(got) != len(want) {
@@ -193,7 +193,7 @@ func TestLoadPluginsCachedPopulatesMarketplaces(t *testing.T) {
 		{
 			Name: "m1", Source: "github", Repo: "a/b", InstallLocation: "/loc/m1",
 			HeadSHA:    "abc1234" + strings.Repeat("0", 33),
-			CommitHash: "abc1234", CommitDate: "2026-06-28",
+			CommitDate: "2026-06-28",
 		},
 		// git failed for m2 (a plain directory) — commit fields stay blank.
 		{Name: "m2", Source: "directory", Path: "/src/m2", InstallLocation: "/src/m2"},
@@ -240,8 +240,9 @@ func TestLoadPluginsFreshPopulatesMarketplaces(t *testing.T) {
 		t.Fatalf("Marketplaces = %+v, want 1 entry", data.Marketplaces)
 	}
 	m := data.Marketplaces[0]
-	if m.Name != "m1" || m.CommitHash != "def5678" || m.CommitDate != "2026-07-01" {
-		t.Errorf("Marketplaces[0] = %+v, want m1 with commit def5678 2026-07-01", m)
+	if m.Name != "m1" || !strings.HasPrefix(m.HeadSHA, "def5678") ||
+		m.CommitDate != "2026-07-01" {
+		t.Errorf("Marketplaces[0] = %+v, want m1 at def5678… 2026-07-01", m)
 	}
 }
 
@@ -538,7 +539,7 @@ func TestParseMarketplaceCatalogFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := map[string]string{"ralphex": "0.17.0", "no-version-plugin": ""}
+	want := map[string]string{"widget": "0.17.0", "no-version-plugin": ""}
 	if len(got) != len(want) {
 		t.Fatalf("len = %d, want %d", len(got), len(want))
 	}
@@ -857,7 +858,7 @@ func TestLoadPluginsCachedSourcesRelative(t *testing.T) {
 	dir := t.TempDir()
 	writeCatalog(t, dir, `{"plugins": [
 		{"name": "widget", "source": "./plugins/widget"},
-		{"name": "gadget", "version": "2.0.0", "source": "./plugins/gadget"}
+		{"name": "gadget", "version": "2.0.0", "source": "./plugins/gadget-old"}
 	]}`)
 	writePluginManifest(t, filepath.Join(dir, "plugins", "widget"), "1.4.0")
 	loc := strconv.Quote(dir)
@@ -904,6 +905,8 @@ func TestLoadPluginsCachedSourcesRelative(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lv := loadSourcesFixture(t, tt.market, tt.headSHA, list)
+			// gadget's version came from `available`, so its source does too,
+			// not from the on-disk catalog entry.
 			want := map[string]PluginSource{
 				"widget": {RepoURL: tt.wantRepo, Commit: tt.wantSHA,
 					Path: "./plugins/widget", CloneDir: dir},
@@ -1000,5 +1003,88 @@ func TestLoadPluginsCachedSourceFollowsWinningVersion(t *testing.T) {
 	none := PluginID{Name: "unversioned", Marketplace: "example-market"}
 	if src, ok := lv.Sources[none]; ok {
 		t.Errorf("unversioned source = %+v, want none without a version", src)
+	}
+}
+
+// A manifest version overrides `available`, so the source must move to the
+// catalog entry whose manifest supplied it.
+func TestLoadPluginsCachedManifestOverrideTakesItsSource(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "helper", "source": "./plugins/helper"}
+	]}`)
+	writePluginManifest(t, filepath.Join(dir, "plugins", "helper"), "1.5.0")
+	market := `{"name": "example-market", "source": "github",
+		"repo": "acme/widgets", "installLocation": ` + strconv.Quote(dir) + `}`
+	lv := loadSourcesFixture(t, market, testHeadSHA, `{
+		"installed": [],
+		"available": [{"pluginId": "helper@example-market", "version": "1.0.0",
+			"source": "./plugins/helper-old"}]
+	}`)
+
+	id := PluginID{Name: "helper", Marketplace: "example-market"}
+	want := PluginSource{RepoURL: "acme/widgets", Commit: testHeadSHA,
+		Path: "./plugins/helper", CloneDir: dir}
+	if v := lv.Versions[id]; v != "1.5.0" {
+		t.Errorf("helper version = %q, want the manifest's 1.5.0", v)
+	}
+	if got := lv.Sources[id]; got != want {
+		t.Errorf("helper source = %+v, want %+v", got, want)
+	}
+}
+
+// With the marketplace list failed the clone cannot be located: a relative
+// source keeps its path but has no clone dir, repo or commit.
+func TestLoadPluginsCachedRelativeSourceWithoutMarketplaceList(t *testing.T) {
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin list --available --json": {Stdout: []byte(`{
+				"installed": [],
+				"available": [{"pluginId": "gadget@example-market",
+					"version": "2.0.0", "source": "./plugins/gadget"}]
+			}`)},
+			"plugin marketplace list --json": {Err: errors.New("boom")},
+		},
+	}
+	data, lv, err := LoadPluginsCached(t.Context(), f, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !data.MarketplacesUnknown {
+		t.Error("MarketplacesUnknown = false, want true")
+	}
+	id := PluginID{Name: "gadget", Marketplace: "example-market"}
+	want := PluginSource{Path: "./plugins/gadget"}
+	if got := lv.Sources[id]; got != want {
+		t.Errorf("gadget source = %+v, want %+v", got, want)
+	}
+}
+
+// End to end: the source LoadPluginsCached resolves leads ReadChangelog to
+// the plugin's own CHANGELOG.md inside the clone.
+func TestLoadPluginsCachedSourceReadsPluginChangelog(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "widget", "source": "./plugins/widget"}
+	]}`)
+	pluginDir := filepath.Join(dir, "plugins", "widget")
+	writePluginManifest(t, pluginDir, "1.4.0")
+	writeFile(t, filepath.Join(pluginDir, "CHANGELOG.md"), "## 1.4.0\n- new\n")
+	writeFile(t, filepath.Join(dir, "CHANGELOG.md"), "## 9.9.9\n")
+	market := `{"name": "example-market", "source": "github",
+		"repo": "acme/widgets", "installLocation": ` + strconv.Quote(dir) + `}`
+	lv := loadSourcesFixture(t, market, testHeadSHA, `{
+		"installed": [{"id": "widget@example-market", "version": "1.2.0",
+			"enabled": true, "scope": "user"}],
+		"available": []
+	}`)
+
+	id := PluginID{Name: "widget", Marketplace: "example-market"}
+	text, file, err := ReadChangelog(lv.Sources[id])
+	if err != nil {
+		t.Fatalf("ReadChangelog: %v", err)
+	}
+	if file != "plugins/widget/CHANGELOG.md" || text != "## 1.4.0\n- new\n" {
+		t.Errorf("got (%q, %q), want the plugin's own changelog", text, file)
 	}
 }
