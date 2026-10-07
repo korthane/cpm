@@ -354,7 +354,7 @@ in Task 1.
 - Modify: `cmd/cpm/main.go`
 - Modify: `cmd/cpm/main_test.go`
 
-- [ ] write failing tests:
+- [x] write failing tests:
   - `cpm outdated --json /dir` routes to the CLI with the profile dir
     resolved
   - `cpm outdated --help` prints the command usage and exits `0`, not the TUI
@@ -363,15 +363,15 @@ in Task 1.
   - `cpm --bogus` still errors
   - `cpm outdated --bogus` → exit `2`
   - `cpm outdated /nonexistent` → exit `1`
-- [ ] extract a testable `run(args, stdout, stderr) int` that holds the
+- [x] extract a testable `run(args, stdout, stderr) int` that holds the
   dispatch and the deferred `stop()` of `signal.NotifyContext`. `main` becomes
   `os.Exit(run(...))`, so defers still run.
-- [ ] check `cli.IsCommand(args[0])` before the global help scan, then:
+- [x] check `cli.IsCommand(args[0])` before the global help scan, then:
   `ParseArgs` (usage error → `2`), `resolveProfiles(opts.Dirs)` (error → `1`),
   and `cli.Run` with `claudecli.NewRunner()` and the signal-aware context
-- [ ] extend the top-level `usage` text with the commands, flags, exit codes
+- [x] extend the top-level `usage` text with the commands, flags, exit codes
   and the `./outdated` note
-- [ ] run `make test` and `make lint` - must pass before next task
+- [x] run `make test` and `make lint` - must pass before next task
 
 ### Task 7: Verify acceptance criteria
 - [ ] verify all requirements from Overview are implemented
