@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/korthane/cpm/internal/claudecli"
 	"github.com/korthane/cpm/internal/config"
@@ -91,10 +94,11 @@ func runCmd(t *testing.T, r claudecli.Runner, profiles []config.Profile,
 
 type jsonOutdated struct {
 	Profiles []struct {
-		Label   string `json:"label"`
-		Path    string `json:"path"`
-		Refresh string `json:"refresh"`
-		Error   string `json:"error"`
+		Label      string `json:"label"`
+		Path       string `json:"path"`
+		Refresh    string `json:"refresh"`
+		Error      string `json:"error"`
+		Incomplete bool   `json:"incomplete"`
 	} `json:"profiles"`
 	Outdated []struct {
 		Plugin   string `json:"plugin"`
@@ -152,12 +156,12 @@ func TestOutdatedText(t *testing.T) {
 		t.Errorf("stderr = %q, want empty", stderr)
 	}
 	want := `bar@acme  latest 6.4.1
-  work  6.3.0  (disabled)
+  work  6.3.0   (disabled)
 foo@acme  latest 0.35.1
   home  0.34.0
   work  0.34.0
 zed@other  latest 3.0.0
-  work  2.0.0  (scope: project)
+  work  2.0.0   (scope: project)
 `
 	if stdout != want {
 		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
@@ -353,14 +357,19 @@ func TestOutdatedEmptyText(t *testing.T) {
 
 func TestOutdatedEmptyJSON(t *testing.T) {
 	t.Parallel()
-	code, stdout, _ := runCmd(t, upToDateRunner(),
+	code, stdout, stderr := runCmd(t, upToDateRunner(),
 		[]config.Profile{homeProfile},
 		Options{Command: "outdated", Format: FormatJSON})
-	if code != 0 {
-		t.Errorf("exit code = %d, want 0", code)
+	if code != 0 || stderr != "" {
+		t.Errorf("code %d stderr %q, want 0 and empty", code, stderr)
 	}
 	if !strings.Contains(stdout, `"outdated":[]`) {
 		t.Errorf("stdout = %s, want an empty outdated array", stdout)
+	}
+	doc := decodeOutdated(t, stdout)
+	if len(doc.Profiles) != 1 || doc.Profiles[0].Refresh != "skipped" ||
+		doc.Profiles[0].Error != "" {
+		t.Errorf("profiles = %+v, want home with refresh skipped", doc.Profiles)
 	}
 }
 
@@ -480,5 +489,315 @@ func TestOutdatedEmptyCatalog(t *testing.T) {
 		Options{Command: "outdated", Format: FormatText})
 	if code != 0 || stdout != "all plugins up to date\n" || stderr != "" {
 		t.Errorf("code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+}
+
+// Install rows share one column layout across every plugin group.
+func TestOutdatedTextAlignsAcrossPlugins(t *testing.T) {
+	t.Parallel()
+	laptop := config.Profile{Path: "/p/laptop", Label: "laptop"}
+	r := newOutdatedRunner(map[string][]byte{
+		homeProfile.Path: pluginList([]fakeInstall{
+			{id: "bar@acme", version: "1.0.0", scope: "user", enabled: false},
+		}, map[string]string{"bar@acme": "2.0.0"}),
+		laptop.Path: pluginList([]fakeInstall{
+			{id: "foo@acme", version: "10.0.0", scope: "user", enabled: true},
+		}, map[string]string{"foo@acme": "11.0.0"}),
+	})
+	_, stdout, _ := runCmd(t, r, []config.Profile{homeProfile, laptop},
+		Options{Command: "outdated", Format: FormatText})
+	want := `bar@acme  latest 2.0.0
+  home    1.0.0   (disabled)
+foo@acme  latest 11.0.0
+  laptop  10.0.0
+`
+	if stdout != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+	}
+}
+
+// Catalog values and labels are third-party text: control characters must
+// not forge output lines or reach the terminal raw.
+func TestOutdatedTextQuotesControlCharacters(t *testing.T) {
+	t.Parallel()
+	forged := "2.0.0\nfake@x  latest 9.9.9"
+	evil := config.Profile{Path: "/p/evil", Label: "ho\x1bme"}
+	r := newOutdatedRunner(map[string][]byte{
+		evil.Path: pluginList([]fakeInstall{
+			{id: "foo@acme", version: "1.0.0", scope: "user", enabled: true},
+		}, map[string]string{"foo@acme": forged}),
+	})
+	r.ResponsesByDir[workProfile.Path] = map[string]claudecli.FakeResponse{
+		pluginListKey: {Err: errors.New("bad\nerror: forged")},
+	}
+	_, stdout, stderr := runCmd(t, r, []config.Profile{evil, workProfile},
+		Options{Command: "outdated", Format: FormatText})
+	want := "foo@acme  latest " + strconv.Quote(forged) + "\n  " +
+		strconv.Quote(evil.Label) + "  1.0.0\n"
+	if stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+	want = "error: work: " + strconv.Quote("bad\nerror: forged") + "\n"
+	if stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+}
+
+// Default labels are directory names, so two profiles can share one; the
+// path then tells them apart.
+func TestOutdatedDuplicateLabelsFallBackToPath(t *testing.T) {
+	t.Parallel()
+	a := config.Profile{Path: "/a/.claude", Label: ".claude"}
+	b := config.Profile{Path: "/b/.claude", Label: ".claude"}
+	list := pluginList([]fakeInstall{
+		{id: "foo@acme", version: "1.0.0", scope: "user", enabled: true},
+	}, map[string]string{"foo@acme": "2.0.0"})
+	r := newOutdatedRunner(map[string][]byte{
+		a.Path: list, b.Path: list, homeProfile.Path: list,
+	})
+	profiles := []config.Profile{a, b, homeProfile}
+
+	_, stdout, _ := runCmd(t, r, profiles,
+		Options{Command: "outdated", Format: FormatText})
+	want := "foo@acme  latest 2.0.0\n" +
+		"  /a/.claude  1.0.0\n  /b/.claude  1.0.0\n  home        1.0.0\n"
+	if stdout != want {
+		t.Errorf("text stdout = %q, want %q", stdout, want)
+	}
+
+	_, stdout, _ = runCmd(t, r, profiles,
+		Options{Command: "outdated", Format: FormatJSON})
+	doc := decodeOutdated(t, stdout)
+	var labels []string
+	for _, p := range doc.Profiles {
+		labels = append(labels, p.Label)
+	}
+	for _, in := range doc.Outdated[0].Installs {
+		labels = append(labels, in.Label)
+	}
+	wantLabels := "/a/.claude /b/.claude home /a/.claude /b/.claude home"
+	if got := strings.Join(labels, " "); got != wantLabels {
+		t.Errorf("JSON labels = %q, want %q", got, wantLabels)
+	}
+}
+
+func TestOutdatedJSONLabelFallsBackToPath(t *testing.T) {
+	t.Parallel()
+	r := newOutdatedRunner(map[string][]byte{
+		"/p/bare": pluginList([]fakeInstall{
+			{id: "foo@acme", version: "1.0.0", scope: "user", enabled: true},
+		}, map[string]string{"foo@acme": "2.0.0"}),
+	})
+	_, stdout, _ := runCmd(t, r, []config.Profile{{Path: "/p/bare"}},
+		Options{Command: "outdated", Format: FormatJSON})
+	doc := decodeOutdated(t, stdout)
+	if doc.Profiles[0].Label != "/p/bare" ||
+		doc.Outdated[0].Installs[0].Label != "/p/bare" {
+		t.Errorf("doc = %+v, want the path as label", doc)
+	}
+}
+
+func TestOutdatedProfileErrorWithRefresh(t *testing.T) {
+	t.Parallel()
+	profiles := []config.Profile{homeProfile, workProfile}
+	code, _, stderr := runCmd(t, failingWorkRunner(), profiles,
+		Options{Command: "outdated", Format: FormatText, Refresh: true})
+	if code != 1 || stderr != "error: work: boom\n" {
+		t.Errorf("text: code %d stderr %q, want 1 and only the error", code, stderr)
+	}
+
+	code, stdout, stderr := runCmd(t, failingWorkRunner(), profiles,
+		Options{Command: "outdated", Format: FormatJSON, Refresh: true})
+	if code != 1 || stderr != "" {
+		t.Errorf("json: code %d stderr %q, want 1 and empty", code, stderr)
+	}
+	doc := decodeOutdated(t, stdout)
+	if p := doc.Profiles[0]; p.Refresh != "ok" || p.Error != "" {
+		t.Errorf("home = %+v, want refresh ok", p)
+	}
+	if p := doc.Profiles[1]; p.Refresh != "skipped" || p.Error != "boom" {
+		t.Errorf("work = %+v, want refresh skipped and error boom", p)
+	}
+}
+
+func TestInstallMarkers(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		scope   string
+		enabled bool
+		want    string
+	}{
+		{"user", true, ""},
+		{"", true, ""},
+		{"user", false, "(disabled)"},
+		{"project", true, "(scope: project)"},
+		{"project", false, "(disabled) (scope: project)"},
+	}
+	for _, tt := range tests {
+		p := claudecli.InstalledPlugin{Scope: tt.scope, Enabled: tt.enabled}
+		if got := installMarkers(p); got != tt.want {
+			t.Errorf("installMarkers(%q, %v) = %q, want %q",
+				tt.scope, tt.enabled, got, tt.want)
+		}
+	}
+}
+
+// deadlineRunner wraps a FakeRunner and records how far away each call's
+// deadline was, keyed by "<dir> <args>"; zero means no deadline.
+type deadlineRunner struct {
+	*claudecli.FakeRunner
+	mu        sync.Mutex
+	remaining map[string]time.Duration
+}
+
+func (d *deadlineRunner) Run(ctx context.Context, dir string,
+	args ...string) ([]byte, error) {
+	var left time.Duration
+	if dl, ok := ctx.Deadline(); ok {
+		left = time.Until(dl)
+	}
+	d.mu.Lock()
+	d.remaining[dir+" "+strings.Join(args, " ")] = left
+	d.mu.Unlock()
+	return d.FakeRunner.Run(ctx, dir, args...)
+}
+
+func TestOutdatedBoundsEachProfileLoad(t *testing.T) {
+	t.Parallel()
+	r := &deadlineRunner{FakeRunner: mixedRunner(),
+		remaining: map[string]time.Duration{}}
+	runCmd(t, r, []config.Profile{homeProfile, workProfile},
+		Options{Command: "outdated", Format: FormatJSON})
+	for _, dir := range []string{homeProfile.Path, workProfile.Path} {
+		if left := r.remaining[dir+" "+pluginListKey]; left <= 0 {
+			t.Errorf("%s: plugin list ran without a deadline", dir)
+		}
+	}
+}
+
+// marketsUnknownRunner fails work's marketplace list, so work's installed
+// plugin (absent from `available`) is never checked against a catalog.
+func marketsUnknownRunner(homeVersion string) *claudecli.FakeRunner {
+	r := newOutdatedRunner(map[string][]byte{
+		homeProfile.Path: pluginList([]fakeInstall{
+			{id: "foo@acme", version: homeVersion, scope: "user", enabled: true},
+		}, map[string]string{"foo@acme": "2.0.0"}),
+		workProfile.Path: pluginList([]fakeInstall{
+			{id: "bar@acme", version: "1.0.0", scope: "user", enabled: true},
+		}, nil),
+	})
+	r.ResponsesByDir[workProfile.Path][marketListKey] = claudecli.FakeResponse{
+		Err: errors.New("list boom"),
+	}
+	return r
+}
+
+func TestOutdatedMarketplacesUnknownText(t *testing.T) {
+	t.Parallel()
+	profiles := []config.Profile{homeProfile, workProfile}
+	wantErr := "error: work: marketplace list failed; " +
+		"its catalogs were not read, so outdated plugins may be missed\n"
+
+	code, stdout, stderr := runCmd(t, marketsUnknownRunner("1.0.0"), profiles,
+		Options{Command: "outdated", Format: FormatText})
+	if code != ExitFailure {
+		t.Errorf("exit code = %d, want %d", code, ExitFailure)
+	}
+	if stderr != wantErr {
+		t.Errorf("stderr = %q, want %q", stderr, wantErr)
+	}
+	if stdout != "foo@acme  latest 2.0.0\n  home  1.0.0\n" {
+		t.Errorf("stdout = %q, want home's outdated plugin", stdout)
+	}
+
+	code, stdout, stderr = runCmd(t, marketsUnknownRunner("2.0.0"), profiles,
+		Options{Command: "outdated", Format: FormatText})
+	if code != ExitFailure {
+		t.Errorf("up to date: exit code = %d, want %d", code, ExitFailure)
+	}
+	if stdout != "" {
+		t.Errorf("up to date: stdout = %q, want no up-to-date claim", stdout)
+	}
+	if stderr != wantErr {
+		t.Errorf("up to date: stderr = %q, want %q", stderr, wantErr)
+	}
+}
+
+// An incomplete profile's installs still meet the other profiles' catalogs,
+// and a version behind one of those is outdated for certain.
+func TestOutdatedMarketplacesUnknownListsInstallsBehindOtherCatalogs(
+	t *testing.T) {
+	t.Parallel()
+	r := newOutdatedRunner(map[string][]byte{
+		homeProfile.Path: pluginList(nil, map[string]string{"bar@acme": "2.0.0"}),
+		workProfile.Path: pluginList([]fakeInstall{
+			{id: "bar@acme", version: "1.0.0", scope: "user", enabled: true},
+		}, nil),
+	})
+	r.ResponsesByDir[workProfile.Path][marketListKey] = claudecli.FakeResponse{
+		Err: errors.New("list boom"),
+	}
+
+	code, stdout, stderr := runCmd(t, r,
+		[]config.Profile{homeProfile, workProfile},
+		Options{Command: "outdated", Format: FormatText})
+	if code != ExitFailure {
+		t.Errorf("exit code = %d, want %d", code, ExitFailure)
+	}
+	if stdout != "bar@acme  latest 2.0.0\n  work  1.0.0\n" {
+		t.Errorf("stdout = %q, want work's install behind home's catalog",
+			stdout)
+	}
+	if !strings.Contains(stderr, "outdated plugins may be missed") {
+		t.Errorf("stderr = %q, want the incomplete warning", stderr)
+	}
+}
+
+func TestOutdatedMarketplacesUnknownJSON(t *testing.T) {
+	t.Parallel()
+	code, stdout, stderr := runCmd(t, marketsUnknownRunner("1.0.0"),
+		[]config.Profile{homeProfile, workProfile},
+		Options{Command: "outdated", Format: FormatJSON})
+	if code != ExitFailure {
+		t.Errorf("exit code = %d, want %d", code, ExitFailure)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty in JSON mode", stderr)
+	}
+	doc := decodeOutdated(t, stdout)
+	if doc.Profiles[0].Incomplete || doc.Profiles[0].Error != "" {
+		t.Errorf("home profile = %+v, want complete", doc.Profiles[0])
+	}
+	if !doc.Profiles[1].Incomplete || doc.Profiles[1].Error != "" {
+		t.Errorf("work profile = %+v, want incomplete, no error",
+			doc.Profiles[1])
+	}
+	if len(doc.Outdated) != 1 || doc.Outdated[0].Plugin != "foo@acme" {
+		t.Errorf("outdated = %+v, want foo from home", doc.Outdated)
+	}
+}
+
+// A catalog version that is a commit hash must not mask a release that
+// another profile's catalog reports, whichever profile comes first.
+func TestOutdatedHashLatestDoesNotMaskRelease(t *testing.T) {
+	t.Parallel()
+	r := newOutdatedRunner(map[string][]byte{
+		homeProfile.Path: pluginList([]fakeInstall{
+			{id: "foo@acme", version: "1.0.0", scope: "user", enabled: true},
+		}, map[string]string{"foo@acme": "1.2.0"}),
+		workProfile.Path: pluginList(nil,
+			map[string]string{"foo@acme": "deadbeef"}),
+	})
+	for _, profiles := range [][]config.Profile{
+		{homeProfile, workProfile}, {workProfile, homeProfile},
+	} {
+		code, stdout, _ := runCmd(t, r, profiles,
+			Options{Command: "outdated", Format: FormatText})
+		if code != ExitOK {
+			t.Errorf("exit code = %d, want %d", code, ExitOK)
+		}
+		if stdout != "foo@acme  latest 1.2.0\n  home  1.0.0\n" {
+			t.Errorf("stdout = %q, want foo behind 1.2.0", stdout)
+		}
 	}
 }

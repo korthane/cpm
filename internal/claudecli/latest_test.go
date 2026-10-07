@@ -532,7 +532,8 @@ func TestLoadPluginsFreshCatalogLoadError(t *testing.T) {
 }
 
 func TestParseMarketplaceCatalogFixture(t *testing.T) {
-	got, err := parseMarketplaceCatalog(readFixture(t, "marketplace_catalog.json"))
+	got, err := parseMarketplaceCatalog(
+		readFixture(t, "marketplace_catalog.json"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -540,9 +541,10 @@ func TestParseMarketplaceCatalogFixture(t *testing.T) {
 	if len(got) != len(want) {
 		t.Fatalf("len = %d, want %d", len(got), len(want))
 	}
-	for name, version := range want {
-		if got[name] != version {
-			t.Errorf("[%q] = %q, want %q", name, got[name], version)
+	for _, e := range got {
+		version, ok := want[e.Name]
+		if !ok || e.Version != version {
+			t.Errorf("entry %+v, want version %q", e, version)
 		}
 	}
 }
@@ -651,13 +653,173 @@ func TestRefreshMarketplacesReturnsError(t *testing.T) {
 	}
 }
 
-func TestRefreshMarketplacesBoundsWithOwnDeadline(t *testing.T) {
+// `cpm refresh` exists to run the update, so the helper must not impose the
+// load path's short refresh cap; the caller's context bounds it.
+func TestRefreshMarketplacesUsesCallerDeadline(t *testing.T) {
 	r := &deadlineRecordingRunner{hasDeadline: map[string]bool{}}
 
 	if err := RefreshMarketplaces(t.Context(), r, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !r.hasDeadline["plugin marketplace update"] {
-		t.Error("marketplace update ran without its own deadline")
+	if r.hasDeadline["plugin marketplace update"] {
+		t.Error("marketplace update got its own deadline, want the caller's")
+	}
+}
+
+// writePluginManifest places a plugin.json with version under
+// dir/.claude-plugin/.
+func writePluginManifest(t *testing.T, dir, version string) {
+	t.Helper()
+	sub := filepath.Join(dir, ".claude-plugin")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name": "x", "version": ` + strconv.Quote(version) + `}`
+	if err := os.WriteFile(filepath.Join(sub, "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A plugin shipped inside the marketplace repo carries its latest version in
+// its own plugin.json, which catalogs often omit or let go stale.
+func TestLoadPluginsCachedInstalledResolvesFromPluginManifest(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "market")
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "nested", "source": "./plugins/nested"},
+		{"name": "at-root", "source": "./"},
+		{"name": "manifest-wins", "version": "5.0.0", "source": "./plugins/mw"},
+		{"name": "no-manifest", "source": "./plugins/none"},
+		{"name": "escapes", "source": "../outside"},
+		{"name": "absolute", "source": `+strconv.Quote(filepath.Join(root, "outside"))+`}
+	]}`)
+	writePluginManifest(t, filepath.Join(dir, "plugins", "nested"), "3.10.3")
+	writePluginManifest(t, dir, "1.1.0")
+	writePluginManifest(t, filepath.Join(dir, "plugins", "mw"), "6.0.0")
+	writePluginManifest(t, filepath.Join(root, "outside"), "9.9.9")
+
+	lv := loadInstalledFixture(t, dir, `{
+		"installed": [
+			{"id": "nested@m1", "version": "3.10.2", "enabled": true, "scope": "user"},
+			{"id": "at-root@m1", "version": "1.0.0", "enabled": true, "scope": "user"},
+			{"id": "manifest-wins@m1", "version": "1.0.0", "enabled": true, "scope": "user"},
+			{"id": "no-manifest@m1", "version": "1.0.0", "enabled": true, "scope": "user"},
+			{"id": "escapes@m1", "version": "1.0.0", "enabled": true, "scope": "user"},
+			{"id": "absolute@m1", "version": "1.0.0", "enabled": true, "scope": "user"}
+		],
+		"available": []
+	}`)
+
+	want := map[string]string{
+		"nested": "3.10.3", "at-root": "1.1.0", "manifest-wins": "6.0.0",
+		"no-manifest": "", "escapes": "", "absolute": "",
+	}
+	for name, version := range want {
+		if v := lv.Versions[PluginID{Name: name, Marketplace: "m1"}]; v != version {
+			t.Errorf("%s@m1 = %q, want %q", name, v, version)
+		}
+	}
+}
+
+// Real catalogs bump plugin.json and forget the marketplace entry; the CLI's
+// `available` version comes from that stale entry, so the manifest must win
+// over it too.
+func TestLoadPluginsCachedManifestWinsOverStaleCatalogVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "inst", "version": "0.3.0", "source": "./plugins/inst"},
+		{"name": "avail", "version": "0.3.0", "source": "./plugins/avail"}
+	]}`)
+	writePluginManifest(t, filepath.Join(dir, "plugins", "inst"), "0.4.0")
+	writePluginManifest(t, filepath.Join(dir, "plugins", "avail"), "0.4.0")
+
+	lv := loadInstalledFixture(t, dir, `{
+		"installed": [{"id": "inst@m1", "version": "0.3.0", "enabled": true, "scope": "user"}],
+		"available": [{"pluginId": "avail@m1", "version": "0.3.0", "source": "./plugins/avail"}]
+	}`)
+
+	for _, name := range []string{"inst", "avail"} {
+		if v := lv.Versions[PluginID{Name: name, Marketplace: "m1"}]; v != "0.4.0" {
+			t.Errorf("%s@m1 = %q, want 0.4.0 from plugin.json", name, v)
+		}
+	}
+}
+
+// Marketplace clones are third-party git content: symlinks out of the clone,
+// non-regular files and oversized files must be ignored, not followed.
+func TestLoadPluginsCachedIgnoresUnsafeCatalogFiles(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "market")
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "linked-out", "source": "./plugins/linked-out"},
+		{"name": "linked-in", "source": "./plugins/linked-in"},
+		{"name": "dir-manifest", "source": "./plugins/dir-manifest"},
+		{"name": "huge", "source": "./plugins/huge"}
+	]}`)
+	writePluginManifest(t, filepath.Join(root, "outside"), "9.9.9")
+	writePluginManifest(t, filepath.Join(dir, "plugins", "real"), "2.0.0")
+	plugins := filepath.Join(dir, "plugins")
+	if err := os.Symlink(filepath.Join(root, "outside"),
+		filepath.Join(plugins, "linked-out")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(plugins, "linked-in")); err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Join(plugins, "dir-manifest", ".claude-plugin",
+		"plugin.json")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hugeDir := filepath.Join(plugins, "huge", ".claude-plugin")
+	if err := os.MkdirAll(hugeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	huge := `{"version": "3.0.0"` + strings.Repeat(" ", maxCatalogFileBytes) + `}`
+	if err := os.WriteFile(filepath.Join(hugeDir, "plugin.json"),
+		[]byte(huge), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lv := loadInstalledFixture(t, dir, `{
+		"installed": [
+			{"id": "linked-out@m1", "version": "1.0.0", "enabled": true, "scope": "user"},
+			{"id": "linked-in@m1", "version": "1.0.0", "enabled": true, "scope": "user"},
+			{"id": "dir-manifest@m1", "version": "1.0.0", "enabled": true, "scope": "user"},
+			{"id": "huge@m1", "version": "1.0.0", "enabled": true, "scope": "user"}
+		],
+		"available": []
+	}`)
+
+	want := map[string]string{
+		"linked-out": "", "linked-in": "2.0.0", "dir-manifest": "", "huge": "",
+	}
+	for name, version := range want {
+		if v := lv.Versions[PluginID{Name: name, Marketplace: "m1"}]; v != version {
+			t.Errorf("%s@m1 = %q, want %q", name, v, version)
+		}
+	}
+}
+
+func TestLoadPluginsCachedIgnoresCatalogSymlinkedOutOfClone(t *testing.T) {
+	root := t.TempDir()
+	writeCatalog(t, filepath.Join(root, "outside"),
+		`{"plugins": [{"name": "foo", "version": "9.9.9"}]}`)
+	dir := filepath.Join(root, "market")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "outside", ".claude-plugin"),
+		filepath.Join(dir, ".claude-plugin")); err != nil {
+		t.Fatal(err)
+	}
+
+	lv := loadInstalledFixture(t, dir, `{
+		"installed": [{"id": "foo@m1", "version": "1.0.0", "enabled": true, "scope": "user"}],
+		"available": []
+	}`)
+
+	if v := lv.Versions[PluginID{Name: "foo", Marketplace: "m1"}]; v != "" {
+		t.Errorf("foo@m1 = %q, want empty", v)
 	}
 }

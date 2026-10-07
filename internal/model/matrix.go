@@ -4,6 +4,7 @@ package model
 
 import (
 	"cmp"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,7 +75,7 @@ func BuildPluginMatrix(perProfile []claudecli.PluginData, latest map[claudecli.P
 			row.Cells[i] = PluginCell{
 				State:    state,
 				Version:  p.Version,
-				Outdated: versionLess(p.Version, row.LatestVersion),
+				Outdated: IsOutdated(p.Version, row.LatestVersion),
 				Scope:    p.Scope,
 			}
 		}
@@ -102,15 +103,16 @@ func ComparePluginIDs(a, b claudecli.PluginID) int {
 // MergeLatestVersions unions the per-profile resolved latest versions into
 // one map for BuildPluginMatrix and reports whether any profile's values are
 // stale (its marketplace refresh failed). Profiles refresh independently, so
-// the same plugin can carry different versions; the newest one wins and empty
-// versions never overwrite a known one.
+// the same plugin can carry different versions; the newest one wins. Empty
+// and commit-hash values are skipped: IsOutdated treats them as unknown, and
+// a hash would sort above every release and mask its upgrade.
 func MergeLatestVersions(perProfile []claudecli.LatestVersions) (map[claudecli.PluginID]string, bool) {
 	latest := map[claudecli.PluginID]string{}
 	stale := false
 	for _, lv := range perProfile {
 		stale = stale || lv.Stale
 		for id, v := range lv.Versions {
-			if v == "" {
+			if v == "" || isCommitHash(v) {
 				continue
 			}
 			if cur, ok := latest[id]; !ok || versionLess(cur, v) {
@@ -121,11 +123,22 @@ func MergeLatestVersions(perProfile []claudecli.LatestVersions) (map[claudecli.P
 	return latest, stale
 }
 
-// IsOutdated reports whether an installed version is strictly behind latest,
-// with the same rules as PluginCell.Outdated: an empty side is never
-// outdated.
+// IsOutdated reports whether an installed version is strictly behind latest
+// (the PluginCell.Outdated rule). An empty or commit-hash side is unknown,
+// never outdated: a hash has no order against a release version.
 func IsOutdated(installed, latest string) bool {
+	if isCommitHash(installed) || isCommitHash(latest) {
+		return false
+	}
 	return versionLess(installed, latest)
+}
+
+var hexRun = regexp.MustCompile(`^[0-9a-f]{6,64}$`)
+
+// isCommitHash requires a hex letter so an all-digit version such as
+// "202401" still compares numerically.
+func isCommitHash(v string) bool {
+	return hexRun.MatchString(v) && strings.ContainsAny(v, "abcdef")
 }
 
 // versionLess reports whether version a is strictly older than b. Unknown

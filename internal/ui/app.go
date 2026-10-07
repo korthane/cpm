@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -25,7 +24,7 @@ import (
 // the network and mcp list health-checks every server, so a hung CLI must
 // degrade to the column's error state instead of spinning forever. A var only
 // so tests can shorten it to drive a real deadline expiry.
-var cmdTimeout = 2 * time.Minute
+var cmdTimeout = claudecli.CommandTimeout
 
 type tab int
 

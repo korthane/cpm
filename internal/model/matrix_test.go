@@ -156,6 +156,7 @@ func TestBuildPluginMatrixLatestVersionAndOutdated(t *testing.T) {
 		{"non-numeric segments compared lexically", "1.2.x", "1.2.y", true},
 		{"fully non-numeric never outdated when equal", "beta", "beta", false},
 		{"fully non-numeric compared lexically", "alpha", "beta", true},
+		{"commit-hash installed version is unknown", "0a1b2c3d", "1.2.0", false},
 	}
 
 	for _, tt := range tests {
@@ -316,6 +317,12 @@ func TestIsOutdated(t *testing.T) {
 		{"1.5.5", "v1.5.6", true},
 		{"", "1.0.0", false},
 		{"1.0.0", "", false},
+		// Commit-hash installs have no order against a release version.
+		{"0a1b2c3d4e5f", "1.2.0", false},
+		{"1a2b3c", "1.2.0", false},
+		{"9f8e7d6c5b4a", "10.0.0", false},
+		{"1.0.0", "abc1234", false},
+		{"alpha", "beta", true},
 	}
 	for _, tt := range tests {
 		if got := IsOutdated(tt.installed, tt.latest); got != tt.want {
@@ -340,5 +347,37 @@ func TestComparePluginIDsOrdersByMarketplaceThenName(t *testing.T) {
 	}
 	if !slices.Equal(ids, want) {
 		t.Errorf("sorted = %v, want %v", ids, want)
+	}
+}
+
+func TestMergeLatestVersionsIgnoresCommitHashes(t *testing.T) {
+	// A hash sorts lexically above any release, so letting it in would
+	// displace a real version and mask the upgrade behind it.
+	perProfile := []claudecli.LatestVersions{
+		{Versions: map[claudecli.PluginID]string{
+			id("p", "m"): "1.2.0", id("h", "m"): "abc1234",
+		}},
+		{Versions: map[claudecli.PluginID]string{id("p", "m"): "abc1234"}},
+	}
+
+	for range 2 {
+		got, _ := MergeLatestVersions(perProfile)
+		if got[id("p", "m")] != "1.2.0" {
+			t.Errorf("latest = %q, want 1.2.0", got[id("p", "m")])
+		}
+		if v, ok := got[id("h", "m")]; ok {
+			t.Errorf("hash-only latest = %q, want no entry", v)
+		}
+		slices.Reverse(perProfile)
+	}
+
+	merged, _ := MergeLatestVersions(perProfile)
+	installed := []claudecli.InstalledPlugin{
+		{ID: id("p", "m"), Version: "1.0.0", Enabled: true, Scope: "user"},
+	}
+	rows := BuildPluginMatrix(
+		[]claudecli.PluginData{{Installed: installed}}, merged)
+	if !rows[0].Cells[0].Outdated || rows[0].LatestVersion != "1.2.0" {
+		t.Errorf("row = %+v, want outdated against 1.2.0", rows[0])
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"io"
 	"slices"
 	"strings"
-	"text/tabwriter"
+	"unicode/utf8"
 
 	"github.com/korthane/cpm/internal/claudecli"
 	"github.com/korthane/cpm/internal/config"
@@ -42,6 +42,12 @@ func (l profileLoad) refreshStatus(refresh bool) string {
 	}
 }
 
+// incomplete reports a load whose marketplace list failed: `available`
+// omits installed plugins, so they met only other profiles' catalogs.
+func (l profileLoad) incomplete() bool {
+	return l.err == nil && l.data.MarketplacesUnknown
+}
+
 type outdatedInstall struct {
 	profile config.Profile
 	plugin  claudecli.InstalledPlugin
@@ -58,15 +64,18 @@ func runOutdated(ctx context.Context, r claudecli.Runner,
 	loads := loadProfiles(ctx, r, profiles, opts.Refresh)
 	outdated := findOutdated(loads)
 
+	// An unchecked profile is a failure too: nothing proves it is current.
 	failed := slices.ContainsFunc(loads,
-		func(l profileLoad) bool { return l.err != nil })
+		func(l profileLoad) bool { return l.err != nil || l.incomplete() })
+	labels := profileLabels(profiles)
 	var err error
 	if opts.Format == FormatJSON {
-		err = writeOutdatedJSON(stdout, loads, outdated, opts.Refresh)
+		err = writeOutdatedJSON(stdout, labels, loads, outdated, opts.Refresh)
 	} else {
-		err = writeOutdatedText(stdout, stderr, loads, outdated, opts.Refresh)
+		err = writeOutdatedText(stdout, stderr, labels, loads, outdated,
+			opts.Refresh, failed)
 	}
-	return exitCode(failed, err, stderr)
+	return ExitCode(failed, err, stderr)
 }
 
 func loadProfiles(ctx context.Context, r claudecli.Runner,
@@ -123,55 +132,67 @@ func findOutdated(loads []profileLoad) []outdatedPlugin {
 	return result
 }
 
-func profileLabel(p config.Profile) string {
-	if p.Label != "" {
-		return p.Label
-	}
-	return p.Path
-}
-
 // writeOutdatedText returns the stdout write error; stderr diagnostics are
 // best-effort.
-func writeOutdatedText(stdout, stderr io.Writer, loads []profileLoad,
-	outdated []outdatedPlugin, refresh bool) error {
-	failed := false
+func writeOutdatedText(stdout, stderr io.Writer, labels map[string]string,
+	loads []profileLoad, outdated []outdatedPlugin,
+	refresh, failed bool) error {
 	for _, l := range loads {
-		label := profileLabel(l.profile)
+		label := quoteControl(labels[l.profile.Path])
 		switch {
 		case l.err != nil:
-			failed = true
-			_, _ = fmt.Fprintf(stderr, "error: %s: %v\n", label, l.err)
+			_, _ = fmt.Fprintf(stderr, "error: %s: %s\n", label,
+				quoteControl(l.err.Error()))
 		case l.refreshStatus(refresh) == refreshFailed:
 			_, _ = fmt.Fprintf(stderr,
 				"warning: %s: marketplace refresh failed; using cached catalog\n",
 				label)
 		}
+		if l.incomplete() {
+			_, _ = fmt.Fprintf(stderr, "error: %s: marketplace list failed; "+
+				"its catalogs were not read, so outdated plugins may be missed\n",
+				label)
+		}
 	}
 
 	if len(outdated) == 0 {
-		// With a failed profile nothing proves its plugins are current.
+		// With a failed or unchecked profile nothing proves its plugins are
+		// current.
 		if !failed {
 			_, err := fmt.Fprintln(stdout, "all plugins up to date")
 			return err
 		}
 		return nil
 	}
-	// Render into memory so one Write reports any stdout failure.
-	var buf bytes.Buffer
-	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
+
+	// One column layout for every group; tabwriter would restart it at each
+	// tab-less header line.
+	labelWidth, versionWidth := 0, 0
 	for _, op := range outdated {
-		_, _ = fmt.Fprintf(tw, "%s  latest %s\n", op.id, op.latest)
 		for _, in := range op.installs {
-			line := "  " + profileLabel(in.profile) + "\t" + in.plugin.Version
-			if markers := installMarkers(in.plugin); markers != "" {
-				line += "\t" + markers
-			}
-			_, _ = fmt.Fprintln(tw, line)
+			// fmt pads by runes, so measure in runes too.
+			labelWidth = max(labelWidth, utf8.RuneCountInString(
+				quoteControl(labels[in.profile.Path])))
+			versionWidth = max(versionWidth, utf8.RuneCountInString(
+				quoteControl(in.plugin.Version)))
 		}
 	}
-	_ = tw.Flush()
-	if buf.Len() == 0 {
-		return nil
+	// Render into memory so one Write reports any stdout failure.
+	var buf bytes.Buffer
+	for _, op := range outdated {
+		_, _ = fmt.Fprintf(&buf, "%s  latest %s\n",
+			quoteControl(op.id.String()), quoteControl(op.latest))
+		for _, in := range op.installs {
+			label := quoteControl(labels[in.profile.Path])
+			version := quoteControl(in.plugin.Version)
+			if markers := installMarkers(in.plugin); markers != "" {
+				_, _ = fmt.Fprintf(&buf, "  %-*s  %-*s  %s\n",
+					labelWidth, label, versionWidth, version, markers)
+			} else {
+				_, _ = fmt.Fprintf(&buf, "  %-*s  %s\n",
+					labelWidth, label, version)
+			}
+		}
 	}
 	_, err := stdout.Write(buf.Bytes())
 	return err
@@ -183,7 +204,7 @@ func installMarkers(p claudecli.InstalledPlugin) string {
 		markers = append(markers, "(disabled)")
 	}
 	if p.Scope != "" && p.Scope != "user" {
-		markers = append(markers, "(scope: "+p.Scope+")")
+		markers = append(markers, "(scope: "+quoteControl(p.Scope)+")")
 	}
 	return strings.Join(markers, " ")
 }
@@ -194,10 +215,11 @@ type outdatedJSON struct {
 }
 
 type profileJSON struct {
-	Label   string `json:"label"`
-	Path    string `json:"path"`
-	Refresh string `json:"refresh"`
-	Error   string `json:"error"`
+	Label      string `json:"label"`
+	Path       string `json:"path"`
+	Refresh    string `json:"refresh"`
+	Error      string `json:"error"`
+	Incomplete bool   `json:"incomplete"`
 }
 
 type outdatedPluginJSON struct {
@@ -214,8 +236,8 @@ type installJSON struct {
 	Enabled bool   `json:"enabled"`
 }
 
-func writeOutdatedJSON(stdout io.Writer, loads []profileLoad,
-	outdated []outdatedPlugin, refresh bool) error {
+func writeOutdatedJSON(stdout io.Writer, labels map[string]string,
+	loads []profileLoad, outdated []outdatedPlugin, refresh bool) error {
 	// Non-nil slices: the documented shape promises arrays, never null.
 	doc := outdatedJSON{
 		Profiles: make([]profileJSON, 0, len(loads)),
@@ -223,9 +245,10 @@ func writeOutdatedJSON(stdout io.Writer, loads []profileLoad,
 	}
 	for _, l := range loads {
 		p := profileJSON{
-			Label:   profileLabel(l.profile),
-			Path:    l.profile.Path,
-			Refresh: l.refreshStatus(refresh),
+			Label:      labels[l.profile.Path],
+			Path:       l.profile.Path,
+			Refresh:    l.refreshStatus(refresh),
+			Incomplete: l.incomplete(),
 		}
 		if l.err != nil {
 			p.Error = l.err.Error()
@@ -240,7 +263,7 @@ func writeOutdatedJSON(stdout io.Writer, loads []profileLoad,
 		}
 		for _, in := range op.installs {
 			o.Installs = append(o.Installs, installJSON{
-				Label:   profileLabel(in.profile),
+				Label:   labels[in.profile.Path],
 				Path:    in.profile.Path,
 				Version: in.plugin.Version,
 				Scope:   in.plugin.Scope,

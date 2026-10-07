@@ -30,25 +30,28 @@ func runRefresh(ctx context.Context, r claudecli.Runner,
 
 	failed := slices.ContainsFunc(results,
 		func(res refreshResult) bool { return res.err != nil })
+	labels := profileLabels(profiles)
 	var err error
 	if opts.Format == FormatJSON {
-		err = writeRefreshJSON(stdout, results)
+		err = writeRefreshJSON(stdout, labels, results)
 	} else {
-		err = writeRefreshText(stdout, stderr, results)
+		err = writeRefreshText(stdout, stderr, labels, results)
 	}
-	return exitCode(failed, err, stderr)
+	return ExitCode(failed, err, stderr)
 }
 
 // writeRefreshText returns the stdout write error; stderr diagnostics are
 // best-effort.
-func writeRefreshText(stdout, stderr io.Writer, results []refreshResult) error {
+func writeRefreshText(stdout, stderr io.Writer, labels map[string]string,
+	results []refreshResult) error {
 	// Render into memory so one Write reports any stdout failure.
 	var buf bytes.Buffer
 	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
 	for _, res := range results {
-		label := profileLabel(res.profile)
+		label := quoteControl(labels[res.profile.Path])
 		if res.err != nil {
-			_, _ = fmt.Fprintf(stderr, "error: %s: %v\n", label, res.err)
+			_, _ = fmt.Fprintf(stderr, "error: %s: %s\n", label,
+				quoteControl(res.err.Error()))
 			continue
 		}
 		_, _ = fmt.Fprintf(tw, "%s\tok\n", label)
@@ -71,12 +74,13 @@ type refreshProfileJSON struct {
 	Error string `json:"error"`
 }
 
-func writeRefreshJSON(stdout io.Writer, results []refreshResult) error {
+func writeRefreshJSON(stdout io.Writer, labels map[string]string,
+	results []refreshResult) error {
 	// Non-nil slice: the documented shape promises an array, never null.
 	doc := refreshJSON{Profiles: make([]refreshProfileJSON, 0, len(results))}
 	for _, res := range results {
 		p := refreshProfileJSON{
-			Label: profileLabel(res.profile),
+			Label: labels[res.profile.Path],
 			Path:  res.profile.Path,
 		}
 		if res.err != nil {

@@ -5,12 +5,14 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
+	"unicode"
 
 	"github.com/korthane/cpm/internal/claudecli"
 	"github.com/korthane/cpm/internal/config"
@@ -38,22 +40,15 @@ type Options struct {
 	Dirs []string
 }
 
-// UsageError reports a malformed command line. Command is empty when the
-// command itself is missing or unknown.
-type UsageError struct {
-	Command string
-	Msg     string
-}
+// Process exit codes, a documented contract for scripts.
+const (
+	ExitOK      = 0
+	ExitFailure = 1 // a profile failed, or output could not be written
+	ExitUsage   = 2 // malformed command line
+)
 
-func (e *UsageError) Error() string {
-	if e.Command == "" {
-		return e.Msg
-	}
-	return e.Command + ": " + e.Msg
-}
-
-// loadTimeout bounds each profile's work; it matches the UI's cmdTimeout.
-const loadTimeout = 2 * time.Minute
+// loadTimeout bounds each profile's work.
+const loadTimeout = claudecli.CommandTimeout
 
 type command struct {
 	usage string
@@ -63,7 +58,9 @@ type command struct {
 		profiles []config.Profile, opts Options, stdout, stderr io.Writer) int
 }
 
-const profilesNote = `
+// ProfilesNote explains where profiles come from when none are given; it
+// ends every usage text.
+const ProfilesNote = `
 With no <profile-dir>, profiles come from ~/.config/cpm/config.yaml or are
 auto-discovered as ~/.claude* directories. Pass a profile dir named like a
 command as ./outdated.`
@@ -78,7 +75,7 @@ the profiles that have them installed.
   --refresh  run 'claude plugin marketplace update' first
   --text     human-readable output (default)
   --json     machine-readable output
-` + profilesNote,
+` + ProfilesNote,
 		refreshFlag: true,
 		run:         runOutdated,
 	},
@@ -90,7 +87,7 @@ result for each one.
 
   --text     human-readable output (default)
   --json     machine-readable output
-` + profilesNote,
+` + ProfilesNote,
 		run: runRefresh,
 	},
 }
@@ -102,20 +99,21 @@ func IsCommand(name string) bool {
 }
 
 // ParseArgs parses `<command> [flags] [<profile-dir> ...]`; flags and dirs
-// may be interleaved. Every failure is a *UsageError. A help flag anywhere
+// may be interleaved. Every error is a usage error, prefixed by the command
+// name once the command is known. A help flag anywhere
 // wins over other flag errors, so `--help` always reaches the usage text.
 func ParseArgs(args []string) (Options, error) {
 	if len(args) == 0 {
-		return Options{}, &UsageError{Msg: "missing command"}
+		return Options{}, errors.New("missing command")
 	}
 	name := args[0]
 	cmd, ok := commands[name]
 	if !ok {
-		return Options{}, &UsageError{Msg: fmt.Sprintf("unknown command %q", name)}
+		return Options{}, fmt.Errorf("unknown command %q", name)
 	}
 	opts := Options{Command: name, Format: FormatText}
 	rest := args[1:]
-	if slices.ContainsFunc(rest, isHelpFlag) {
+	if slices.ContainsFunc(rest, IsHelpFlag) {
 		opts.Help = true
 		return opts, nil
 	}
@@ -131,17 +129,14 @@ func ParseArgs(args []string) (Options, error) {
 			opts.Refresh = true
 		case strings.HasPrefix(arg, "-"):
 			// Dashed dirs are rejected too: they would read as a flag typo.
-			return Options{}, &UsageError{
-				Command: name, Msg: fmt.Sprintf("unknown flag %q", arg),
-			}
+			return Options{}, fmt.Errorf("%s: unknown flag %q", name, arg)
 		default:
 			opts.Dirs = append(opts.Dirs, arg)
 		}
 	}
 	if text && json {
-		return Options{}, &UsageError{
-			Command: name, Msg: "--text and --json are mutually exclusive",
-		}
+		return Options{}, fmt.Errorf(
+			"%s: --text and --json are mutually exclusive", name)
 	}
 	if json {
 		opts.Format = FormatJSON
@@ -149,7 +144,8 @@ func ParseArgs(args []string) (Options, error) {
 	return opts, nil
 }
 
-func isHelpFlag(arg string) bool {
+// IsHelpFlag reports whether arg asks for usage text.
+func IsHelpFlag(arg string) bool {
 	return arg == "-h" || arg == "--help"
 }
 
@@ -163,11 +159,11 @@ func Run(ctx context.Context, r claudecli.Runner, profiles []config.Profile,
 	cmd, ok := commands[opts.Command]
 	if !ok {
 		_, _ = fmt.Fprintf(stderr, "cpm: unknown command %q\n", opts.Command)
-		return 2
+		return ExitUsage
 	}
 	if opts.Help {
-		_, _ = fmt.Fprintln(stdout, cmd.usage)
-		return 0
+		_, err := fmt.Fprintln(stdout, cmd.usage)
+		return ExitCode(false, err, stderr)
 	}
 	return cmd.run(ctx, r, profiles, opts, stdout, stderr)
 }
@@ -190,15 +186,43 @@ func mapProfiles[T any](ctx context.Context, profiles []config.Profile,
 	return results
 }
 
-// exitCode maps a command's outcome to its exit code. A failed stdout write
+// profileLabels maps each profile path to its display label: the configured
+// label, or the path when the label is empty or shared with another profile
+// (default labels are directory names, so /a/.claude and /b/.claude clash).
+func profileLabels(profiles []config.Profile) map[string]string {
+	uses := map[string]int{}
+	for _, p := range profiles {
+		uses[p.Label]++
+	}
+	labels := make(map[string]string, len(profiles))
+	for _, p := range profiles {
+		labels[p.Path] = p.Label
+		if p.Label == "" || uses[p.Label] > 1 {
+			labels[p.Path] = p.Path
+		}
+	}
+	return labels
+}
+
+// quoteControl Go-quotes text holding control characters, so third-party
+// values (catalog versions, CLI errors) cannot forge text output lines or
+// inject terminal escapes.
+func quoteControl(s string) string {
+	if strings.ContainsFunc(s, unicode.IsControl) {
+		return strconv.Quote(s)
+	}
+	return s
+}
+
+// ExitCode maps a command's outcome to its exit code. A failed stdout write
 // exits 1 even when every profile succeeded: the result is incomplete.
-func exitCode(profileFailed bool, writeErr error, stderr io.Writer) int {
+func ExitCode(profileFailed bool, writeErr error, stderr io.Writer) int {
 	if writeErr != nil {
 		_, _ = fmt.Fprintf(stderr, "cpm: write output: %v\n", writeErr)
-		return 1
+		return ExitFailure
 	}
 	if profileFailed {
-		return 1
+		return ExitFailure
 	}
-	return 0
+	return ExitOK
 }

@@ -14,9 +14,7 @@ import (
 // duration. Tests using it must not run in parallel.
 func stubGitCommitInfo(t *testing.T, fn func(ctx context.Context, dir string) (string, string, error)) {
 	t.Helper()
-	orig := gitCommitInfo
-	gitCommitInfo = fn
-	t.Cleanup(func() { gitCommitInfo = orig })
+	t.Cleanup(StubGitCommitInfo(fn))
 }
 
 func TestFillCommitInfo(t *testing.T) {

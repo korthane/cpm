@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/korthane/cpm/internal/claudecli"
 	"github.com/korthane/cpm/internal/config"
@@ -137,5 +139,53 @@ func TestRefreshAllFailedText(t *testing.T) {
 	}
 	if stderr != "error: home: offline\nerror: work: offline\n" {
 		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+// `cpm refresh` gets the whole per-profile budget, not the load path's short
+// refresh cap: the update is the command's entire job.
+func TestRefreshUsesFullProfileBudget(t *testing.T) {
+	t.Parallel()
+	r := &deadlineRunner{FakeRunner: refreshRunner(),
+		remaining: map[string]time.Duration{}}
+	runCmd(t, r, []config.Profile{homeProfile},
+		Options{Command: "refresh", Format: FormatText})
+	left := r.remaining[homeProfile.Path+" "+marketUpdateKy]
+	if left <= time.Minute {
+		t.Errorf("deadline in %v, want the %v profile budget", left, loadTimeout)
+	}
+}
+
+func TestRefreshJSONLabelFallsBackToPath(t *testing.T) {
+	t.Parallel()
+	_, stdout, _ := runCmd(t, refreshRunner(),
+		[]config.Profile{{Path: "/p/bare"}},
+		Options{Command: "refresh", Format: FormatJSON})
+	if got := decodeRefresh(t, stdout).Profiles[0].Label; got != "/p/bare" {
+		t.Errorf("label = %q, want the path", got)
+	}
+}
+
+func TestRefreshDuplicateLabelsFallBackToPath(t *testing.T) {
+	t.Parallel()
+	a := config.Profile{Path: "/a/.claude", Label: ".claude"}
+	b := config.Profile{Path: "/b/.claude", Label: ".claude"}
+	_, stdout, _ := runCmd(t, refreshRunner(), []config.Profile{a, b},
+		Options{Command: "refresh", Format: FormatText})
+	if want := "/a/.claude  ok\n/b/.claude  ok\n"; stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRefreshTextQuotesControlCharacters(t *testing.T) {
+	t.Parallel()
+	r := &claudecli.FakeRunner{Default: claudecli.FakeResponse{
+		Err: errors.New("bad\nwork  ok"),
+	}}
+	_, _, stderr := runCmd(t, r, []config.Profile{workProfile},
+		Options{Command: "refresh", Format: FormatText})
+	want := "error: work: " + strconv.Quote("bad\nwork  ok") + "\n"
+	if stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 }

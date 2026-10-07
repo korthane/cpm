@@ -15,9 +15,10 @@ import (
 // Regression: `plugin list --available` leaves installed plugins out, so
 // their latest version must come from the marketplace's catalog file.
 func TestLoadPluginsCachedInstalledPluginResolvesFromCatalogFile(t *testing.T) {
-	claudecli.StubGitCommitInfo(t, func(context.Context, string) (string, string, error) {
-		return "", "", errors.New("not a git repository")
-	})
+	t.Cleanup(claudecli.StubGitCommitInfo(
+		func(context.Context, string) (string, string, error) {
+			return "", "", errors.New("not a git repository")
+		}))
 	dir := t.TempDir()
 	sub := filepath.Join(dir, ".claude-plugin")
 	if err := os.MkdirAll(sub, 0o755); err != nil {

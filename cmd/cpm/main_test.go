@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/korthane/cpm/internal/claudecli"
+	"github.com/korthane/cpm/internal/cli"
 	"github.com/korthane/cpm/internal/config"
 )
 
@@ -265,6 +266,26 @@ func TestRunTopLevelHelpListsCommands(t *testing.T) {
 	}
 }
 
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("disk full")
+}
+
+func TestRunHelpFailedStdoutWriteExitsOne(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"outdated", "--help"}} {
+		f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+		var stderr bytes.Buffer
+		code := f.launcher().run(args, failingWriter{}, &stderr)
+		if code != cli.ExitFailure {
+			t.Errorf("%v: code = %d, want %d", args, code, cli.ExitFailure)
+		}
+		if want := "cpm: write output: disk full\n"; stderr.String() != want {
+			t.Errorf("%v: stderr = %q, want %q", args, stderr.String(), want)
+		}
+	}
+}
+
 func TestRunProfileDirStartsTUI(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
@@ -305,6 +326,44 @@ func TestRunUnknownTopLevelFlagErrors(t *testing.T) {
 	}
 	if len(f.tuiCalls) != 0 {
 		t.Fatal("unknown flag started the TUI")
+	}
+}
+
+// A flag before the command takes the TUI path, which rejects it with the
+// TUI's exit 1; only usage errors inside a command exit 2.
+func TestRunFlagBeforeCommandExitsOne(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+	code, _, stderr := runCapture(t, f, "--json", "outdated")
+	if code != 1 || !strings.Contains(stderr, `unknown flag "--json"`) {
+		t.Fatalf("code = %d, stderr = %q, want 1 and unknown flag", code, stderr)
+	}
+	if len(f.tuiCalls) != 0 || len(f.runner.Calls) != 0 {
+		t.Fatal("flag before the command ran claude or started the TUI")
+	}
+}
+
+// A profile dir named like a command is reached as ./outdated.
+func TestRunCommandNamedDirStartsTUI(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "outdated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+	code, _, stderr := runCapture(t, f, "./outdated")
+	if code != 0 || stderr != "" {
+		t.Fatalf("code = %d, stderr = %q, want 0 and empty", code, stderr)
+	}
+	if len(f.tuiCalls) != 1 || len(f.tuiCalls[0]) != 1 ||
+		filepath.Base(f.tuiCalls[0][0].Path) != "outdated" {
+		t.Fatalf("TUI calls = %+v, want one with the outdated dir", f.tuiCalls)
+	}
+	if len(f.runner.Calls) != 0 {
+		t.Fatalf("dir named like a command ran the CLI: %+v", f.runner.Calls)
 	}
 }
 

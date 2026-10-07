@@ -6,7 +6,8 @@ behavior.
 
 ## Commands
 
-- `make build` / `make test` / `make lint` (golangci-lint) / `make run`
+- `make build` / `make test` (with `-race`) / `make lint` (golangci-lint) /
+  `make run`
 - Coverage bar: 80%+ on non-UI packages (`claudecli`, `cli`, `config`,
   `model`).
 
@@ -22,9 +23,15 @@ behavior.
 - `internal/ui` — Bubble Tea app: one `column` of state per profile, loads run
   async per profile, the MCP tab loads lazily on first view.
 - `internal/cli` — non-interactive commands (`outdated`, `refresh`); no Bubble
-  Tea imports. `Run` returns the exit code and loads profiles in parallel
-  under `loadTimeout`; `outdated` reuses `model.MergeLatestVersions` /
-  `IsOutdated` / `ComparePluginIDs` so it agrees with the TUI.
+  Tea imports. `Run` returns the exit code (`ExitOK`/`ExitFailure`/
+  `ExitUsage`, shared with `cmd/cpm`) and loads profiles in parallel under
+  `loadTimeout` (`claudecli.CommandTimeout`, also the UI's `cmdTimeout`
+  default); `outdated` reuses `model.MergeLatestVersions` /
+  `IsOutdated` / `ComparePluginIDs` so it agrees with the TUI. A profile
+  with `MarketplacesUnknown` is `incomplete` (its own catalogs went unread,
+  so its installs met only other profiles' catalogs): stderr error / JSON
+  `"incomplete": true`, exit 1, no `all plugins up to date` claim; installs
+  found behind another profile's catalog are still listed.
 - `cmd/cpm` — `launcher.run` routes `args[0]` that `cli.IsCommand` accepts to
   `cli.ParseArgs` (usage error → exit 2) + `resolveProfiles` + `cli.Run`,
   before the global `-h` scan so `cpm outdated --help` reaches command help;
@@ -44,8 +51,11 @@ behavior.
   helper); tests doing so must not use `t.Parallel()`. Any test whose fake
   marketplace list carries a non-empty `installLocation` must stub it, or the
   load's commit-info pass execs the real `git` against that path. The
-  external `claudecli_test` package (needed to import `model` without a
-  cycle) reaches it as `StubGitCommitInfo` via `export_test.go`.
+  external `claudecli_test` package uses `StubGitCommitInfo`
+  (`export_test.go`, so it never ships in the build), which returns a
+  restore func for `t.Cleanup`. Other packages cannot stub it: `internal/cli`
+  tests keep `installLocation` empty and feed latest versions through canned
+  `available` entries.
 - Real CLI output is captured as fixtures under `internal/claudecli/testdata/`.
 - UI behavior is tested by driving `Model.Update` directly with key/load
   messages and asserting on `View()` output; no TTY needed.
@@ -62,10 +72,23 @@ behavior.
   version.
 - `claude plugin list --available --json` leaves *installed* plugins out of
   `available`, so `LoadPluginsCached` seeds every installed ID into the
-  version map with `""` before the `marketplace.json` fallback — otherwise
-  installed plugins never get a latest version. Catalog entries without a
-  `version` fall back to a version-like `source.ref` (`isVersionRef`), the
-  same rule applied to `available` entries.
+  version map with `""` and then applies each marketplace's on-disk
+  `marketplace.json` — otherwise installed plugins never get a latest
+  version. The precedence rule lives in the `LoadPluginsCached` doc comment:
+  a plugin's own `.claude-plugin/plugin.json` (relative string `source`
+  inside the clone) beats the catalog entry `version`, which beats a
+  version-like `source.ref` (`isVersionRef`). The manifest overrides even a
+  version from `available` — catalogs bump `plugin.json` and forget the
+  entry, and Claude Code itself resolves in-repo plugins from the manifest.
+  Known limitation: a plugin whose catalog `source` is remote (a `url`,
+  `git-subdir` or `github` object) has no in-clone `plugin.json`; installed,
+  it gets a latest version only from an entry `version` or a version-like
+  `source.ref`, and without either it is never reported outdated.
+- Marketplace clones are third-party git content, so catalog and manifest
+  reads go through `os.OpenRoot(installLocation)` (`readCloneFile`): paths
+  and symlinks escaping the clone are refused, only regular files are read
+  (`Stat` before `Open` — opening a FIFO blocks), capped at 1 MiB. These
+  reads take no ctx, so they must never block.
 - `claude mcp list` has no `--json` mode and health-checks every server, so it
   is slow — hence the lazy MCP tab and tab-scoped reload. Its output includes
   project/local-scope servers (cwd-dependent) and plugin-provided servers
@@ -74,11 +97,13 @@ behavior.
   still printing valid JSON; parseable object output wins over the exit code.
 - Every UI-fired CLI call carries a timeout (`cmdTimeout` in
   `internal/ui/app.go`) so a hung `claude` degrades to a per-column error. The
-  marketplace refresh gets its own 30s sub-budget (`refreshTimeout` in
-  `internal/claudecli/latest.go`) so a hung git remote degrades to a stale
-  catalog instead of eating the whole load budget. A timed-out *action* is
-  "uncertain" — the write may have partially applied — and forces a column
-  reload.
+  marketplace refresh gets its own 30s sub-budget (`refreshTimeout`, applied
+  by `LoadPluginsFresh` in `internal/claudecli/latest.go`) so a hung git
+  remote degrades to a stale catalog instead of eating the whole load
+  budget. `RefreshMarketplaces` itself is uncapped: `cpm refresh` exists to
+  run the update, so it gets the full per-profile `loadTimeout`. A
+  timed-out *action* is "uncertain" — the write may have partially
+  applied — and forces a column reload.
 - Killing a timed-out `claude` is not enough: children it spawned (stdio MCP
   servers from `mcp list`, git from `marketplace update`) inherit the output
   pipes and keep `cmd.Run` blocked past the timeout. The runner starts each
@@ -195,3 +220,9 @@ behavior.
   `internal/model` (leading `v` ignored, missing segment = 0, pre-release <
   release, empty never outdated, lexical fallback for non-numeric segments) —
   not a semver library, which would reject real-world refs like `1.2.3.4`.
+  `model.IsOutdated` is the single "outdated" rule (matrix cells and `cpm
+  outdated`); it treats a commit-hash side (hex with a letter) as unknown,
+  because `0a1b2c3d` would otherwise compare as `0.<suffix>` and read as
+  behind every release. `MergeLatestVersions` drops hash latests for the
+  same reason: a hash sorts lexically above any release, so it would
+  displace a real version from another profile and mask the upgrade.

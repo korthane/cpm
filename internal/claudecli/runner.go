@@ -16,6 +16,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// CommandTimeout is the default budget for one profile's sequence of claude
+// calls (a load or an action), shared by the TUI and the CLI commands.
+const CommandTimeout = 2 * time.Minute
+
 // Runner executes the claude CLI against a specific profile directory.
 //
 // profileDir sets CLAUDE_CONFIG_DIR for the invocation so the command targets

@@ -250,33 +250,54 @@ auto-discovery). Flags and profile dirs may be interleaved; `--text` (the
 default) and `--json` are mutually exclusive. A profile dir named like a
 command is reached as `./outdated`. Profiles load in parallel, each bounded
 by the same two-minute timeout as the TUI, and one failing profile does not
-stop the others.
+stop the others. Within that budget the marketplace update run by
+`outdated --refresh` is capped at 30 seconds, after which the cached catalog
+is used; `cpm refresh` gives the update the full two minutes.
 
 ### `cpm outdated`
 
 Lists every installed plugin whose version is behind the newest version
 found in any profile's marketplace catalog, with the profiles holding the
-old version. It reads the cached catalogs; `--refresh` runs
-`claude plugin marketplace update` in each profile first (if that fails, the
-cached catalog is used and a warning is printed). Every installed entry is
+old version. It reads the cached catalogs; for a plugin stored inside the
+marketplace clone, its own `plugin.json` version wins over the catalog entry
+(as in Claude Code), since catalogs often lag it. `--refresh`
+runs `claude plugin marketplace update` in each profile first (if that fails,
+the cached catalog is used: text mode prints a warning to stderr, JSON
+reports `"refresh": "failed"`). Every installed entry is
 checked, so a plugin installed at both user and project scope in one profile
 is reported if either install is behind. Installs whose version the CLI
-reports as `unknown` are never reported — there is nothing to compare.
+reports as `unknown`, or as a commit hash, are never reported — there is no
+release version to compare; a commit hash in a catalog never counts as the
+latest version either. Neither are installed plugins whose catalog entry
+points outside the marketplace clone (a remote `url`, `git-subdir` or
+GitHub source) and carries neither a `version` nor a version-like `ref`:
+with no `plugin.json` in the clone, no latest version is known for them.
 
 ```text
 $ cpm outdated
 bar@acme  latest 6.4.1
-  work  6.3.0  (disabled)
+  work  6.3.0   (disabled)
 foo@acme  latest 0.35.1
   home  0.34.0
   work  0.34.0
 ```
 
 Plugins are sorted by marketplace, then name; installs follow profile order.
-Profiles are shown by label (path when there is none); an install at a
-non-`user` scope is marked `(scope: project)`. With nothing outdated it
-prints `all plugins up to date` — unless a profile failed to load, in which
-case stdout stays empty, since nothing proves that profile is current.
+Profiles are shown by their config.yaml label, or by the directory name
+(e.g. `.claude-work`) when none is set; two profiles sharing a label are
+shown by path instead. An install at a non-`user` scope is marked
+`(scope: project)`. With nothing outdated it
+prints `all plugins up to date` — unless a profile failed to load or could
+not be fully checked, in which case stdout stays empty, since nothing proves
+that profile is current.
+
+If a profile's `claude plugin marketplace list` fails, its catalog files
+cannot be located, so its installed plugins (which the CLI's `available`
+list leaves out) are checked only against other profiles' catalogs. Text
+mode reports `error: work: marketplace list failed; its catalogs were not
+read, so outdated plugins may be missed` on stderr, JSON marks the profile
+`"incomplete": true`, and the exit code is `1`. Outdated installs that were
+found — in that profile too — are still listed.
 
 ```sh
 $ cpm outdated --json
@@ -285,8 +306,10 @@ $ cpm outdated --json
 ```json
 {
   "profiles": [
-    {"label": "home", "path": "/home/me/.claude", "refresh": "skipped", "error": ""},
-    {"label": "work", "path": "/home/me/.claude-work", "refresh": "skipped", "error": ""}
+    {"label": "home", "path": "/home/me/.claude", "refresh": "skipped",
+     "error": "", "incomplete": false},
+    {"label": "work", "path": "/home/me/.claude-work", "refresh": "skipped",
+     "error": "", "incomplete": false}
   ],
   "outdated": [
     {"plugin": "foo@acme", "latest": "0.35.1",
@@ -301,7 +324,9 @@ $ cpm outdated --json
 (Pretty-printed here; the actual output is one line.) `outdated` is always
 an array, never `null`. `refresh` is `skipped` (no `--refresh`, or the
 profile failed to load), `ok`, or `failed` (stale catalog used); `error` is
-empty unless the profile failed to load.
+empty unless the profile failed to load; `incomplete` is `true` when the
+profile loaded but its marketplace list failed, so its installed plugins
+were checked only against other profiles' catalogs.
 
 ### `cpm refresh`
 
@@ -323,7 +348,9 @@ TUI or `claude` is working on the same profile.
 
 ### Streams and exit codes
 
-Results go to stdout. In text mode errors and warnings go to stderr. In JSON
+Results go to stdout. In text mode errors and warnings go to stderr, and a
+value holding control characters (a plugin ID, version, label or error
+message) is printed Go-quoted so it cannot forge lines. In JSON
 mode command results and per-profile errors are carried inside the JSON and
 stderr stays empty; usage errors, profile-resolution errors and a failed
 stdout write are still plain stderr text.
@@ -331,8 +358,9 @@ stdout write are still plain stderr text.
 | Code | Meaning |
 | --- | --- |
 | `0` | success — including when outdated plugins are found, and when a `--refresh` failed but the cached catalog was used |
-| `1` | a profile failed to load (for `cpm refresh`: failed to refresh), profiles could not be resolved (none found, a path that is not a directory), or stdout could not be written |
+| `1` | a profile failed to load (for `cpm refresh`: failed to refresh) or, for `cpm outdated`, could not be fully checked (`incomplete`), profiles could not be resolved (none found, a path that is not a directory, a malformed `config.yaml`, an unresolvable `$HOME`), or stdout could not be written |
 | `2` | usage error in a command: unknown flag (`cpm outdated --bogus`), `--text` with `--json`, a profile dir starting with `-` |
 
 Without a command, a bad argument such as `cpm --bogus` keeps the TUI
-launcher's behavior and exits `1`.
+launcher's behavior and exits `1` — so does a flag placed before the command
+(`cpm --json outdated`), which is not a command line.

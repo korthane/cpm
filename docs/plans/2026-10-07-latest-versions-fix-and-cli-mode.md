@@ -87,6 +87,14 @@
   `parseMarketplaceCatalog` currently reads only `version`. Make it fall back
   to a `source.ref` that passes `isVersionRef`, the same rule `latestVersion`
   applies to `available` entries, so ref-tagged catalog entries resolve too.
+  For a plugin stored inside the marketplace repo (a relative string
+  `source` such as `./plugins/foo`), its own
+  `<installLocation>/<source>/.claude-plugin/plugin.json` version wins over
+  the catalog entry and over `available` (catalogs omit or forget to bump
+  it; Claude Code resolves in-repo plugins the same way). Precedence:
+  plugin.json > entry `version` > version-like `source.ref`. Files are read
+  through `os.OpenRoot(installLocation)`: escaping paths and symlinks,
+  non-regular files and files over 1 MiB are ignored.
 - **CLI dispatch:** `main` checks `args[0]` *before* the global `-h`/`--help`
   scan, so `cpm outdated --help` reaches the command help. If `args[0]` is a
   known command (`cli.IsCommand`), `main` calls `cli.ParseArgs(args)`. A usage
@@ -114,30 +122,44 @@
   gets its own `marketplace update` and `config.normalize` dedups profiles by
   resolved path. Writes are *not* coordinated with another process, such as a
   running cpm TUI or `claude` on the same profile. This is documented, not
-  locked. Each profile load runs under `loadTimeout` (2 min, a constant in
-  `internal/cli` that matches the UI's `cmdTimeout`).
+  locked. Each profile load runs under `loadTimeout` (2 min,
+  `claudecli.CommandTimeout`, which is also the UI's `cmdTimeout` default).
 - **Shared refresh helper:** add `claudecli.RefreshMarketplaces(ctx, r, dir)
-  error`, which runs `plugin marketplace update` under `refreshTimeout`.
-  `LoadPluginsFresh` and `cpm refresh` both use it, so neither the args nor
-  the 30s budget is duplicated.
+  error`, which runs `plugin marketplace update` bounded only by ctx.
+  `LoadPluginsFresh` (and so `outdated --refresh`) wraps it in the 30s
+  `refreshTimeout`, falling back to the cached catalog; `cpm refresh` gives
+  it the whole `loadTimeout`, since the update is that command's entire job.
 - **FakeRunner concurrency:** `FakeRunner.Run` appends to `Calls` without a
   lock. Parallel CLI loads would race on it, so it gets a `sync.Mutex`.
 - **Streams and exit codes:**
   - data goes to stdout
   - in text mode, errors and warnings go to stderr
-  - in JSON mode, errors are carried inside the JSON and stderr stays empty
+  - in JSON mode, command results and per-profile errors are carried inside
+    the JSON and stderr stays empty; usage errors, profile-resolution errors
+    and a failed stdout write stay plain stderr text
+  - in text mode, third-party values (plugin IDs, versions, labels, CLI
+    errors) holding control characters are Go-quoted, so they cannot forge
+    output lines or inject terminal escapes
   - exit codes:
     - `0`: success, including when outdated plugins are found (brew
       semantics) and when a requested refresh failed (stale data, with a
       warning)
-    - `1`: any profile failed to load, or profile resolution failed (no
-      profiles, a dir that isn't a directory)
-    - `2`: usage error (unknown flag, `--text` together with `--json`, unknown
-      command, a profile dir starting with `-`)
+    - `1`: any profile failed to load or (`outdated`) loaded with an
+      unknown marketplace list, so its installed plugins went unchecked
+      (`incomplete`), profile resolution failed (no
+      profiles, a dir that isn't a directory, a malformed config.yaml, an
+      unresolvable `$HOME`), or stdout could not be written
+    - `2`: usage error after the command name (unknown flag, `--text`
+      together with `--json`, a profile dir starting with `-`). A flag
+      before any command (`cpm --json outdated`) takes the TUI path and
+      keeps its exit `1`
   - one failing profile does not stop the others
 - **Unknown versions:** installed versions the CLI reports as `unknown` (an
-  empty version) are never outdated (`versionLess` with an empty side), so
-  `outdated` omits them. Document this in the README.
+  empty version) are never outdated (`IsOutdated` with an empty side), so
+  `outdated` omits them; nor is a commit-hash version, which has no order
+  against a release. A hash catalog latest is dropped by
+  `MergeLatestVersions`, so it never displaces another profile's release.
+  Document this in the README.
 
 ## Technical Details
 - Command line:
@@ -151,26 +173,33 @@
   a usage error. Profile dirs starting with `-` are still rejected (they are
   treated as unknown flags).
 - `outdated --text` (empty result → `all plugins up to date`, unless a
-  profile failed to load: then stdout stays empty, since nothing proves the
-  failed profile's plugins are current):
+  profile failed to load or is incomplete: then stdout stays empty, since
+  nothing proves that profile's plugins are current):
   ```
-  foo@acme  latest 0.35.1
-    home      0.34.0
-    work      0.34.0
   bar@acme  latest 6.4.1
-    work      6.3.0  (disabled)
+    work  6.3.0   (disabled)
+  foo@acme  latest 0.35.1
+    home  0.34.0
+    work  0.34.0
   ```
+  Install rows share one column layout across all plugin groups.
   stderr: `error: other: <message>`, and with `--refresh`, a profile whose
   refresh failed adds
   `warning: <label>: marketplace refresh failed; using cached catalog`.
-  The profile is shown by `Label`, falling back to `Path`. A non-`user` scope
+  A profile whose marketplace list failed (`MarketplacesUnknown`) adds
+  `error: <label>: marketplace list failed; its catalogs were not read, so
+  outdated plugins may be missed`; its installs found behind another
+  profile's catalog are still listed.
+  The profile is shown by `Label` (the config.yaml label or the directory
+  name), falling back to `Path` when it is empty or shared by two profiles,
+  in text and JSON alike. A non-`user` scope
   is shown as `(scope: project)`.
 - `outdated --json` (stable, documented shape):
   ```json
   {
     "profiles": [
       {"label": "home", "path": "/Users/x/.claude-home",
-       "refresh": "ok", "error": ""}
+       "refresh": "ok", "error": "", "incomplete": false}
     ],
     "outdated": [
       {"plugin": "foo@acme", "latest": "0.35.1",
@@ -181,7 +210,9 @@
   ```
   `outdated` is always an array (`[]` when empty), never `null`. `refresh` is
   `"skipped"` (no `--refresh`, or the profile errored), `"ok"` or `"failed"`
-  (stale catalog used).
+  (stale catalog used). `incomplete` is `true` when the marketplace list
+  failed, so installed plugins (absent from `available`) were checked only
+  against other profiles' catalogs.
 - `refresh --text`: one stdout line per refreshed profile, `home  ok`; a
   failed profile goes to stderr as `error: home: <msg>` (same as
   `outdated`). `--json`: `{"profiles":[{"label","path","error"}]}`.
@@ -203,7 +234,7 @@
 - Modify: `internal/claudecli/latest.go`
 - Modify: `internal/claudecli/latest_test.go`
 - Modify: `internal/claudecli/plugins.go`
-- ➕ Create: `internal/claudecli/latest_matrix_test.go`, `internal/claudecli/export_test.go` (external test package: importing `model` from package `claudecli` is an import cycle)
+- ➕ Create: `internal/claudecli/latest_matrix_test.go`, external test package (importing `model` from package `claudecli` is an import cycle; it uses `claudecli.StubGitCommitInfo` from `export_test.go`)
 
 - [x] write a failing test (with `stubGitCommitInfo`, no `t.Parallel`): an
   installed `foo@acme` 0.34.0 that is absent from `available`, and a
@@ -213,7 +244,8 @@
   through `model.MergeLatestVersions` + `model.BuildPluginMatrix` and assert
   the cell is `Outdated`.
 - [x] write a failing test: the version of an installed plugin that also
-  appears in `available` with a version is not overwritten by the catalog file
+  appears in `available` with a version is not overwritten by the catalog file entry
+  (➕ but is overridden by the plugin's own `plugin.json`, see review fix)
 - [x] write a failing test: a catalog entry with no `version` but a
   version-like `source.ref` (`v1.5.5`) resolves; a branch ref (`main`) does not
 - [x] write a test: an installed plugin with no catalog entry stays `""`, and
@@ -268,7 +300,7 @@
   - `Help` prints that command's usage and returns `0`
   - an unknown command returns `2`
 - [x] implement `IsCommand`, `ParseArgs` returning
-  `Options{Command, Format, Refresh, Help, Dirs}` (with a usage error type),
+  `Options{Command, Format, Refresh, Help, Dirs}` (usage errors as plain errors),
   the per-command usage text, and `Run(ctx, r, profiles, opts, stdout, stderr) int`
   dispatching to the command handlers
 - [x] run `make test` - must pass before next task
@@ -309,7 +341,7 @@ in Task 1.
   result with `MergeLatestVersions` + `BuildPluginMatrix` and keep only rows
   with an `Outdated` cell. (Amended: evaluate every `Installed` entry
   instead of matrix cells; see the ➕ item below.)
-- [x] implement the text renderer (tabwriter, label falling back to path,
+- [x] implement the text renderer (aligned columns, label falling back to path,
   scope and disabled markers, errors and warnings on stderr) and the JSON
   renderer (the shape in Technical Details, with non-nil slices)
 - [x] ➕ report every outdated install, not one cell per profile: export
@@ -342,9 +374,14 @@ in Task 1.
   when output could not be written completely (`outdated` and `refresh`,
   text and JSON); failing-`io.Writer` tests for all four
 - [x] ➕ extract the shared parallel per-profile runner (`mapProfiles`) and
-  exit-code mapping (`exitCode`) into `cli.go`, used by both commands
+  exit-code mapping (`ExitCode`) into `cli.go`, used by both commands
+  (and by `cmd/cpm` for top-level help)
 - [x] ➕ document in Technical Details that `outdated --text` prints nothing
   to stdout when nothing is outdated but a profile failed to load
+- [x] ➕ a profile with `MarketplacesUnknown` is `incomplete` (installed
+  plugins met only other profiles' catalogs): stderr error line / JSON
+  `"incomplete": true`, exit `1`, no `all plugins up to date`; other
+  profiles' results still listed. Tests for text, JSON and exit code
 - [x] run `make test` and `go test -race ./internal/cli/...` - must pass
   before next task
 

@@ -103,9 +103,8 @@ func TestParseArgsUsageErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := ParseArgs(tt.args)
-			var uerr *UsageError
-			if !errors.As(err, &uerr) {
-				t.Fatalf("ParseArgs(%q) error = %v, want *UsageError", tt.args, err)
+			if err == nil {
+				t.Fatalf("ParseArgs(%q) succeeded, want a usage error", tt.args)
 			}
 			if !strings.Contains(err.Error(), tt.wantMsg) {
 				t.Errorf("error %q does not contain %q", err, tt.wantMsg)
@@ -117,15 +116,8 @@ func TestParseArgsUsageErrors(t *testing.T) {
 func TestUsageErrorNamesCommand(t *testing.T) {
 	t.Parallel()
 	_, err := ParseArgs([]string{"outdated", "--bogus"})
-	var uerr *UsageError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("error = %v, want *UsageError", err)
-	}
-	if uerr.Command != "outdated" {
-		t.Errorf("Command = %q, want outdated", uerr.Command)
-	}
-	if !strings.HasPrefix(err.Error(), "outdated: ") {
-		t.Errorf("error %q should be prefixed by the command", err)
+	if err == nil || !strings.HasPrefix(err.Error(), "outdated: ") {
+		t.Errorf("error %v should be prefixed by the command", err)
 	}
 }
 
@@ -214,6 +206,10 @@ func TestRunFailedStdoutWriteExitsOne(t *testing.T) {
 			Options{Command: "refresh", Format: FormatText}},
 		{"refresh json", func() *claudecli.FakeRunner { return refreshRunner() },
 			Options{Command: "refresh", Format: FormatJSON}},
+		{"outdated help", mixedRunner,
+			Options{Command: "outdated", Help: true}},
+		{"refresh help", func() *claudecli.FakeRunner { return refreshRunner() },
+			Options{Command: "refresh", Help: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

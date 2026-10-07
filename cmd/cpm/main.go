@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -37,12 +38,10 @@ exit:
   --text     human-readable output (default)
   --json     machine-readable output
 
-Exit codes: 0 success (outdated plugins found is still success),
-1 a profile failed or could not be resolved, 2 usage error.
-
-With no <profile-dir>, profiles come from ~/.config/cpm/config.yaml or are
-auto-discovered as ~/.claude* directories. Pass a profile dir named like a
-command as ./outdated.`
+Command exit codes: 0 success (outdated plugins found is still success);
+1 a profile failed or could not be resolved, or output could not be
+written; 2 a malformed command line after the command name.
+` + cli.ProfilesNote
 
 func main() {
 	l := launcher{runner: claudecli.NewRunner(), startTUI: startTUI}
@@ -67,23 +66,21 @@ func (l launcher) run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && cli.IsCommand(args[0]) {
 		return l.runCommand(args, stdout, stderr)
 	}
-	for _, arg := range args {
-		if arg == "-h" || arg == "--help" {
-			_, _ = fmt.Fprintln(stdout, usage)
-			return 0
-		}
+	if slices.ContainsFunc(args, cli.IsHelpFlag) {
+		_, err := fmt.Fprintln(stdout, usage)
+		return cli.ExitCode(false, err, stderr)
 	}
 
 	profiles, err := resolveProfiles(args)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "cpm:", err)
-		return 1
+		return cli.ExitFailure
 	}
 	if err := l.startTUI(l.runner, profiles); err != nil {
 		_, _ = fmt.Fprintln(stderr, "cpm:", err)
-		return 1
+		return cli.ExitFailure
 	}
-	return 0
+	return cli.ExitOK
 }
 
 // runCommand runs a non-interactive command. Usage and profile-resolution
@@ -92,14 +89,14 @@ func (l launcher) runCommand(args []string, stdout, stderr io.Writer) int {
 	opts, err := cli.ParseArgs(args)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "cpm:", err)
-		return 2
+		return cli.ExitUsage
 	}
 	var profiles []config.Profile
 	if !opts.Help {
 		profiles, err = resolveProfiles(opts.Dirs)
 		if err != nil {
 			_, _ = fmt.Fprintln(stderr, "cpm:", err)
-			return 1
+			return cli.ExitFailure
 		}
 	}
 	// Cancelling on a signal lets the runner kill each claude process group.
