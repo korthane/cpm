@@ -140,6 +140,7 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 		data.Marketplaces = markets
 	}
 	data.MarketplacesUnknown = mErr != nil
+	fillInstalledCommits(profileDir, data.Installed)
 
 	lv := LatestVersions{Versions: map[PluginID]string{}}
 	for _, a := range data.Available {

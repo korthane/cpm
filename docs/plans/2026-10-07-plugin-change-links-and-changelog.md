@@ -275,19 +275,33 @@
 - Create: `internal/claudecli/installed_commits.go`
 - Create: `internal/claudecli/installed_commits_test.go`
 - Create: `internal/claudecli/testdata/installed_plugins.json` (generic data)
+- Create: `internal/claudecli/main_test.go` (`TestMain` pointing `HOME` at
+  an empty temp dir)
 
-- [ ] write tests: `installPath` parsed into `InstalledPlugin.InstallPath`;
+- [x] write tests: `installPath` parsed into `InstalledPlugin.InstallPath`;
       `CommitSHA` filled by matching `installPath`; missing file, malformed
       JSON, unknown `version`, missing `gitCommitSha`, oversize file → empty
       SHA and no load error; empty profile dir resolves to `~/.claude`
       (`t.Setenv("HOME")`, so no `t.Parallel()`); an `installPath` reached
       through a symlink still matches (compare cleaned/resolved paths), with
       a fallback match on (id, scope) when exactly one entry has them
-- [ ] parse `installPath` in `plugins.go`
-- [ ] implement the best-effort read of `<profile>/plugins/installed_plugins.json`
+- [x] parse `installPath` in `plugins.go`
+- [x] implement the best-effort read of `<profile>/plugins/installed_plugins.json`
       (size-capped, regular file only) and fill `CommitSHA` once in
       `LoadPluginsCached` (`LoadPluginsFresh` goes through it)
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
+- [x] ➕ `TestMain` in `claudecli` sets `HOME` to an empty temp dir: loads
+      for the default profile (`""`) now read
+      `~/.claude/plugins/installed_plugins.json`, which must never be the
+      developer's real file in tests; the read reuses `readCloneFile` under
+      `os.OpenRoot(<profile>/plugins)` (1 MiB cap); `cli`/`ui` tests that
+      start asserting on `CommitSHA` (Tasks 6, 8) need the same guard
+- [x] ➕ review follow-up: the install-path match ignored scope, so a
+      project install could take a user record's SHA at the same path. It
+      now matches path within the install's scope only; several matches
+      yield the SHA their non-empty values agree on (a SHA-less record
+      hides nothing), conflicting SHAs yield empty. The scope fallback
+      still requires exactly one record of that scope
 
 ### Task 4: Latest-version source and changelog read (claudecli)
 

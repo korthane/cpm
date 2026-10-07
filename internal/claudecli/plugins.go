@@ -31,12 +31,16 @@ func (id PluginID) String() string {
 // InstalledPlugin is a plugin present in a profile. Version is empty when the
 // CLI reports it as "unknown". Scope is where the plugin is installed ("user",
 // "project", or "local"); non-user scopes are cwd-dependent, so cpm's
-// `--scope user`-pinned actions cannot touch them.
+// `--scope user`-pinned actions cannot touch them. InstallPath is the
+// plugin's cache directory; CommitSHA is the commit it was installed from,
+// empty when unknown (see fillInstalledCommits).
 type InstalledPlugin struct {
-	ID      PluginID
-	Version string
-	Enabled bool
-	Scope   string
+	ID          PluginID
+	Version     string
+	Enabled     bool
+	Scope       string
+	InstallPath string
+	CommitSHA   string
 }
 
 // AvailablePlugin is a marketplace catalog entry. LatestVersion is empty when
@@ -64,10 +68,11 @@ type PluginData struct {
 }
 
 type installedJSON struct {
-	ID      string `json:"id"`
-	Version string `json:"version"`
-	Enabled bool   `json:"enabled"`
-	Scope   string `json:"scope"`
+	ID          string `json:"id"`
+	Version     string `json:"version"`
+	Enabled     bool   `json:"enabled"`
+	Scope       string `json:"scope"`
+	InstallPath string `json:"installPath"`
 }
 
 // availableJSON matches an `available[]` catalog entry. `source` is
@@ -108,10 +113,11 @@ func LoadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, 
 			version = ""
 		}
 		data.Installed = append(data.Installed, InstalledPlugin{
-			ID:      ParsePluginID(p.ID),
-			Version: version,
-			Enabled: p.Enabled,
-			Scope:   p.Scope,
+			ID:          ParsePluginID(p.ID),
+			Version:     version,
+			Enabled:     p.Enabled,
+			Scope:       p.Scope,
+			InstallPath: p.InstallPath,
 		})
 	}
 	for _, a := range raw.Available {

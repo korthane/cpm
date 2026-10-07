@@ -47,11 +47,15 @@ func TestLoadPluginsFixture(t *testing.T) {
 	}
 
 	wantInstalled := []InstalledPlugin{
-		{ID: PluginID{Name: "clangd-lsp", Marketplace: "claude-plugins-official"}, Version: "1.0.0", Enabled: true, Scope: "user"},
+		{ID: PluginID{Name: "clangd-lsp", Marketplace: "claude-plugins-official"}, Version: "1.0.0", Enabled: true, Scope: "user",
+			InstallPath: "/Users/u/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0"},
 		// version "unknown" is normalized to empty.
-		{ID: PluginID{Name: "feature-dev", Marketplace: "claude-plugins-official"}, Version: "", Enabled: true, Scope: "user"},
-		{ID: PluginID{Name: "ralphex", Marketplace: "ralphex"}, Version: "0.17.0", Enabled: true, Scope: "user"},
-		{ID: PluginID{Name: "superpowers", Marketplace: "claude-plugins-official"}, Version: "6.1.0", Enabled: true, Scope: "user"},
+		{ID: PluginID{Name: "feature-dev", Marketplace: "claude-plugins-official"}, Version: "", Enabled: true, Scope: "user",
+			InstallPath: "/Users/u/.claude/plugins/cache/claude-plugins-official/feature-dev/unknown"},
+		{ID: PluginID{Name: "ralphex", Marketplace: "ralphex"}, Version: "0.17.0", Enabled: true, Scope: "user",
+			InstallPath: "/Users/u/.claude/plugins/cache/ralphex/ralphex/0.17.0"},
+		{ID: PluginID{Name: "superpowers", Marketplace: "claude-plugins-official"}, Version: "6.1.0", Enabled: true, Scope: "user",
+			InstallPath: "/Users/u/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.0"},
 	}
 	if len(got.Installed) != len(wantInstalled) {
 		t.Fatalf("Installed len = %d, want %d", len(got.Installed), len(wantInstalled))
