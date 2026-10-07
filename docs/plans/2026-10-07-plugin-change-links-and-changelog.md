@@ -416,11 +416,11 @@
       compare link from the catalog of the profile supplying latest
 
 ### Task 10: [Final] Update documentation
-- [ ] update README.md: links in `outdated` output, `--changelog`, JSON
+- [x] update README.md: links in `outdated` output, `--changelog`, JSON
       fields, TUI `o` key
-- [ ] update CLAUDE.md: `installed_plugins.json` read (read-only,
+- [x] update CLAUDE.md: `installed_plugins.json` read (read-only,
       best-effort), source/link construction rules, changelog heading rules
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move plan (done by orchestrator at completion)
 
 ## Post-Completion
 *Items requiring manual intervention or external systems - no checkboxes,

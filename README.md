@@ -36,14 +36,18 @@ cpm is a thin front end over the public `claude` CLI: all reads use
 `claude ... --json` (except `claude mcp list`, which has no JSON mode and is
 parsed as plain text) and all mutations use `claude plugin ...` / `claude mcp
 remove`, each invoked with `CLAUDE_CONFIG_DIR` pointed at the target profile.
-cpm never edits Claude's internal JSON files directly.
+cpm never edits Claude's internal JSON files directly. The one file it reads
+itself is `<profile>/plugins/installed_plugins.json`, for the commit each
+plugin was installed from (the CLI does not report it); the read is
+best-effort, and without it change links are simply left out.
 
 ## Requirements
 
 - The `claude` CLI must be on `PATH` — every read and action shells out to it.
 - `git` on `PATH` is optional but recommended: marketplace freshness (commit
   hash and date) is read from each clone with `git log`; without it those
-  header cells stay blank.
+  header cells stay blank, and plugins stored in the clone get no change
+  links.
 - The fold chevrons are NerdFont glyphs; without a NerdFont-patched terminal
   font they render as replacement boxes (cosmetic only).
 - Go 1.26.4+ to build from source.
@@ -185,6 +189,16 @@ Plugins tab, on a plugin row, applied to the selected cell:
 | `u` | update (installed plugin) |
 | `x` | uninstall (installed plugin; asks `y/n`) |
 | `i` | install into a profile where the plugin is absent |
+| `o` | open the change link of an outdated install in the browser |
+
+When the selected cell is an outdated install and cpm can build a link for
+it, the status line below the table shows `changes: <url>` — a GitHub
+compare view from the installed commit to the latest one, or, when the
+installed commit is unknown, the plugin's commit history (see
+[Change links](#change-links)). `o` opens exactly that URL with the system
+opener (`open` on macOS, `xdg-open` elsewhere) and is listed in the help line
+only while a link is shown. A pending confirmation or a status message takes
+the status line first. cpm opens only `https://github.com/` URLs.
 
 Plugins tab, on a marketplace header row:
 
@@ -240,7 +254,7 @@ A command as the first argument makes cpm print a result and exit instead of
 starting the TUI — for scripts, agents and quick checks:
 
 ```sh
-cpm outdated [--refresh] [--text|--json] [<profile-dir> ...]
+cpm outdated [--refresh] [--changelog] [--text|--json] [<profile-dir> ...]
 cpm refresh  [--text|--json] [<profile-dir> ...]
 cpm <command> --help
 ```
@@ -277,9 +291,12 @@ with no `plugin.json` in the clone, no latest version is known for them.
 $ cpm outdated
 bar@acme  latest 6.4.1
   work  6.3.0   (disabled)
+    changes: https://github.com/acme/plugins/compare/1a2b3c4...5d6e7f8
+  history: https://github.com/acme/plugins/commits/5d6e7f8/plugins/bar
 foo@acme  latest 0.35.1
   home  0.34.0
   work  0.34.0
+    changes: https://github.com/acme/foo/compare/9a8b7c6...0f1e2d3
 ```
 
 Plugins are sorted by marketplace, then name; installs follow profile order.
@@ -299,6 +316,79 @@ read, so outdated plugins may be missed` on stderr, JSON marks the profile
 `"incomplete": true`, and the exit code is `1`. Outdated installs that were
 found — in that profile too — are still listed.
 
+#### Change links
+
+Each install can be followed by an indented `changes:` line: a GitHub
+compare page from the commit that install came from to the commit the latest
+version comes from, i.e. exactly what an update would bring in. A plugin
+living in a subdirectory of its repository (a multi-plugin marketplace)
+also gets one `history:` line after its installs: the commit history of
+that directory at the latest commit. A compare page cannot be narrowed to a
+path, so in a shared repository it also lists other plugins' commits; the
+history link shows only this plugin's. A line is left out when its link
+cannot be built — e.g. the installed commit is unknown (some installs, such
+as older ones or directory sources, record none), or the two commits are
+the same.
+
+Links are built offline from data already on disk:
+
+- The installed commit comes from the profile's
+  `plugins/installed_plugins.json`.
+- For a plugin stored in the marketplace clone, the latest commit is the
+  clone's `HEAD` and the repository is the marketplace's GitHub repo.
+- For a plugin whose catalog entry points elsewhere (a remote `url`,
+  `git-subdir` or GitHub source), they come from that entry: its pinned
+  `sha`, else its `ref`. A `ref` is best-effort — a branch can move after
+  the catalog was fetched — so such links are exact only when both ends are
+  pinned commits.
+- The latest commit is taken from the same profile that supplied the
+  latest version, so link and version always agree.
+
+Only GitHub repositories get links. Marketplaces added from a local
+directory, clones without git, and repositories hosted anywhere else get
+none; neither do plugins whose version is a commit hash, since they are
+never reported outdated.
+
+#### `--changelog`
+
+`--changelog` adds, once per plugin, the entries of its `CHANGELOG.md` from
+the latest version (inclusive) down to the oldest version installed in any
+profile (exclusive), so every install's missing entries are covered:
+
+```text
+$ cpm outdated --changelog
+foo@acme  latest 0.35.1
+  home  0.34.0
+  work  0.34.0
+    changes: https://github.com/acme/foo/compare/9a8b7c6...0f1e2d3
+  changelog (CHANGELOG.md):
+    ## v0.35.1 - 2026-01-01
+    - Fix the widget refresh.
+
+    ## v0.35.0 - 2025-12-15
+    - Add the widget panel.
+```
+
+The file is read from the local marketplace clone — the plugin's own
+directory first, then the clone root — and its path is shown in the header
+line. Version headings such as `## 1.2.0`, `## v1.2.0 - date`,
+`## [1.2.0]` and `## [1.2.0](link)` are recognized; in a changelog shared by
+several plugins, headings prefixed with the plugin name
+(`## foo v0.35.1`) select that plugin's sections only. Headings inside code
+blocks are ignored and long excerpts are cut at 200 lines. When there is
+nothing to show, a single line says why:
+
+- `changelog: no entry for 0.35.1` — the file has no heading for the latest
+  version (it may track something else, e.g. the app rather than the
+  plugin);
+- `changelog: no CHANGELOG.md` — the clone has none;
+- `changelog: no local changelog` — the plugin lives outside the
+  marketplace clone, so there is nothing local to read.
+
+The changelog is informational and never changes the exit code. Only
+`outdated` accepts `--changelog`; `cpm refresh --changelog` is a usage
+error.
+
 ```sh
 $ cpm outdated --json
 ```
@@ -315,8 +405,10 @@ $ cpm outdated --json
     {"plugin": "foo@acme", "latest": "0.35.1",
      "installs": [
        {"label": "home", "path": "/home/me/.claude", "version": "0.34.0",
-        "scope": "user", "enabled": true}
-     ]}
+        "scope": "user", "enabled": true,
+        "compare_url": "https://github.com/acme/foo/compare/9a8b7c6...0f1e2d3"}
+     ],
+     "history_url": ""}
   ]
 }
 ```
@@ -326,7 +418,18 @@ an array, never `null`. `refresh` is `skipped` (no `--refresh`, or the
 profile failed to load), `ok`, or `failed` (stale catalog used); `error` is
 empty unless the profile failed to load; `incomplete` is `true` when the
 profile loaded but its marketplace list failed, so its installed plugins
-were checked only against other profiles' catalogs.
+were checked only against other profiles' catalogs. `compare_url` (per
+install) and `history_url` (per plugin) are the links described above, `""`
+when unknown. With `--changelog` each plugin also carries `"changelog":
+{"file": "CHANGELOG.md", "since": "0.34.0", "text": "## v0.35.1 …"}` —
+`file` is the path inside the clone, `since` the exclusive lower bound,
+`text` the raw excerpt — or `"changelog": null` in any of the three
+nothing-to-show cases; without the flag the key is absent.
+
+JSON is the stable interface for scripts: new data is only ever added as new
+fields. The text layout is for people and may gain lines — such as the indented
+`changes:`, `history:` and `changelog` lines — that a line-parsing script
+could trip over.
 
 ### `cpm refresh`
 

@@ -15,11 +15,14 @@ behavior.
 
 - `internal/claudecli` — wraps the `claude` CLI behind the `Runner` interface;
   every invocation sets `CLAUDE_CONFIG_DIR` to the target profile. cpm never
-  edits Claude's JSON files directly; all mutations go through the CLI.
+  edits Claude's JSON files directly; all mutations go through the CLI. The
+  one Claude file it reads itself is `installed_plugins.json` (see below).
 - `internal/config` — profile resolution: CLI args > `~/.config/cpm/config.yaml`
   > auto-discovered `~/.claude*` directories.
 - `internal/model` — pure aggregation of per-profile CLI data into comparison
-  matrices; no I/O.
+  matrices; no I/O. Also the pure halves of change links (`links.go`:
+  `GitHubWebURL`, `ChangeLinks`) and changelog excerpts (`changelog.go`:
+  `ChangelogExcerpt`); the file read is `claudecli.ReadChangelog`.
 - `internal/ui` — Bubble Tea app: one `column` of state per profile, loads run
   async per profile, the MCP tab loads lazily on first view.
 - `internal/cli` — non-interactive commands (`outdated`, `refresh`); no Bubble
@@ -56,6 +59,15 @@ behavior.
   restore func for `t.Cleanup`. Other packages cannot stub it: `internal/cli`
   tests keep `installLocation` empty and feed latest versions through canned
   `available` entries.
+- `claudecli`, `cli` and `ui` each have a `TestMain` (`main_test.go`) that
+  points `HOME` at an empty temp dir: a default-profile (`""`) load reads
+  `~/.claude/plugins/installed_plugins.json`, which must never be the
+  developer's real file. The `ui` one also replaces `openURL` with a stub
+  that errors, so an unstubbed `o` test fails instead of opening a browser.
+- `LatestVersions.Sources` and `InstalledPlugin.CommitSHA` come from files
+  and git, not from `FakeRunner`, so link and changelog tests in `cli` (a
+  `package cli` test) build `[]profileLoad` values directly; changelog tests
+  point `Sources[id].CloneDir` at a temp dir (no git needed).
 - Real CLI output is captured as fixtures under `internal/claudecli/testdata/`.
 - UI behavior is tested by driving `Model.Update` directly with key/load
   messages and asserting on `View()` output; no TTY needed.
@@ -88,7 +100,60 @@ behavior.
   reads go through `os.OpenRoot(installLocation)` (`readCloneFile`): paths
   and symlinks escaping the clone are refused, only regular files are read
   (`Stat` before `Open` — opening a FIFO blocks), capped at 1 MiB. These
-  reads take no ctx, so they must never block.
+  reads take no ctx, so they must never block. `ReadChangelog` (plugin-dir
+  `CHANGELOG.md`, then the clone root) goes through the same path.
+- `plugin list --json` reports `installPath` but no commit, so
+  `LoadPluginsCached` fills `InstalledPlugin.CommitSHA` from
+  `<profile>/plugins/installed_plugins.json` (`installed_commits.go`;
+  `""` profile → `~/.claude`). Read-only and best-effort: any failure leaves
+  SHAs empty and only drops links. Only `"version": 2` is understood. The
+  read reuses `readCloneFile` under `os.OpenRoot(<profile>/plugins)`. A
+  record counts only within the install's scope (a project install must not
+  take a user record's SHA at the same path): records at the same install
+  path (symlinks resolved) yield the SHA their non-empty values agree on —
+  a SHA-less record hides nothing, conflicting SHAs give `""` — else the
+  only record of that id and scope.
+- `LatestVersions.Sources` says where each latest version lives
+  (`PluginSource{RepoURL, Commit, Path, CloneDir}`). `setLatest` writes the
+  version and the source of the *same* entry, so the source always follows
+  whichever rule won the version (manifest / entry / ref); an empty version
+  drops the source. Relative sources always keep `Path` + `CloneDir` (the
+  changelog needs no git) and set `RepoURL` + `Commit` (marketplace repo,
+  clone HEAD = `Marketplace.HeadSHA`, full SHA from `%H %cs`) only as a
+  pair. Remote sources carry their repo, `sha` (else `ref`, best-effort: a
+  branch can move) and `path`, no `CloneDir`.
+- `model.LatestSource` picks the source of a profile whose own version
+  equals the merged latest (version compare, not string equality), so link
+  and version agree; ties prefer a non-stale profile, then profile order.
+  Matrix/group builders keep their signatures — the UI calls it for the
+  selected row only.
+- Link parts are third-party data and the URL may reach the system opener,
+  so `model/links.go` validates everything: host exactly `github.com`
+  (case-insensitive; no other userinfo, port, query or fragment), owner/repo
+  `[A-Za-z0-9._-]+` and not `.`/`..`, a commit is a hex SHA or slash-free
+  ref without `..` (a `/` would escape to `%2F`, dots break `a...b`). Path
+  segments allow any characters but are each `url.PathEscape`d (`%2e%2e`
+  cannot traverse); absolute paths and literal `..` segments are refused
+  before `path.Clean`; `.` (repo root) gives no history link. No compare
+  link when installed and latest commits are the same (short SHA prefix
+  counts).
+- `ChangelogExcerpt` headings: ATX `#`–`###` (≤3 spaces indent, then a
+  space) whose first word is a version (*plain*) or a name then a version
+  (*scoped*); `[1.2.0]` / `[1.2.0](link)` are unwrapped. *Every* version
+  heading ends the section above it, but only this plugin's are collected:
+  scoped ones (name case-insensitive) if the file has any, else plain ones —
+  so an interleaved multi-plugin file never leaks another plugin's body.
+  The excerpt starts at the collected heading equal to latest and stops at
+  the first one `<=` installed; newer headings met later are skipped. No
+  latest heading → `ok=false`. Lines inside ``` / ~~~ fences are never
+  headings; a ``` line whose info string contains a backtick is an inline
+  code span, not a fence (CommonMark). Capped at 200 lines.
+- The TUI opener (`internal/ui/open.go`, injectable `openURL`) refuses any
+  URL not starting with `https://github.com/` — on macOS `open` also
+  launches files and apps — and runs `open`/`xdg-open` without a shell,
+  with a 5s timeout and stdio detached so it cannot draw over the screen.
+  The `changes:` status text renders in the existing status slot, so
+  `chromeLines` is unchanged.
 - `claude mcp list` has no `--json` mode and health-checks every server, so it
   is slow — hence the lazy MCP tab and tab-scoped reload. Its output includes
   project/local-scope servers (cwd-dependent) and plugin-provided servers
