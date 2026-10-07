@@ -194,28 +194,29 @@
 - Modify: `internal/claudecli/latest.go`
 - Modify: `internal/claudecli/latest_test.go`
 - Modify: `internal/claudecli/plugins.go`
+- ➕ Create: `internal/claudecli/latest_matrix_test.go`, `internal/claudecli/export_test.go` (external test package: importing `model` from package `claudecli` is an import cycle)
 
-- [ ] write a failing test (with `stubGitCommitInfo`, no `t.Parallel`): an
+- [x] write a failing test (with `stubGitCommitInfo`, no `t.Parallel`): an
   installed `foo@acme` 0.34.0 that is absent from `available`, and a
   marketplace whose `installLocation` is a temp dir containing
   `.claude-plugin/marketplace.json` with `0.35.1` → expect
   `lv.Versions[foo@acme] == "0.35.1"`. In the same test, feed the result
   through `model.MergeLatestVersions` + `model.BuildPluginMatrix` and assert
   the cell is `Outdated`.
-- [ ] write a failing test: the version of an installed plugin that also
+- [x] write a failing test: the version of an installed plugin that also
   appears in `available` with a version is not overwritten by the catalog file
-- [ ] write a failing test: a catalog entry with no `version` but a
+- [x] write a failing test: a catalog entry with no `version` but a
   version-like `source.ref` (`v1.5.5`) resolves; a branch ref (`main`) does not
-- [ ] write a test: an installed plugin with no catalog entry stays `""`, and
+- [x] write a test: an installed plugin with no catalog entry stays `""`, and
   the load does not fail
-- [ ] in `LoadPluginsCached`, add `data.Installed` IDs to `lv.Versions` (only
+- [x] in `LoadPluginsCached`, add `data.Installed` IDs to `lv.Versions` (only
   where they are missing) before the `unresolved` scan, and update the doc
   comment to explain why: `available` leaves installed plugins out
-- [ ] make `parseMarketplaceCatalog` fall back to `source.ref` through
+- [x] make `parseMarketplaceCatalog` fall back to `source.ref` through
   `isVersionRef` (`source` may be a string or an object)
-- [ ] fix the stale `AvailablePlugin` comment in `plugins.go`: the catalog
+- [x] fix the stale `AvailablePlugin` comment in `plugins.go`: the catalog
   fallback lives in `LoadPluginsCached`, not `LoadPluginsFresh`
-- [ ] run `make test` - must pass before next task
+- [x] run `make test` - must pass before next task
 
 ### Task 2: Shared refresh helper and concurrency-safe FakeRunner
 

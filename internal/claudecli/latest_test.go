@@ -546,3 +546,78 @@ func TestParseMarketplaceCatalogFixture(t *testing.T) {
 		}
 	}
 }
+
+// loadInstalledFixture runs LoadPluginsCached against a fake profile whose
+// single marketplace m1 is cloned at dir; git lookups are stubbed out.
+func loadInstalledFixture(t *testing.T, dir, pluginList string) LatestVersions {
+	t.Helper()
+	stubGitCommitInfo(t, func(context.Context, string) (string, string, error) {
+		return "", "", errors.New("not a git repository")
+	})
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin list --available --json": {Stdout: []byte(pluginList)},
+			"plugin marketplace list --json": {Stdout: []byte(`[
+				{"name": "m1", "installLocation": ` + strconv.Quote(dir) + `}
+			]`)},
+		},
+	}
+	_, lv, err := LoadPluginsCached(t.Context(), f, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return lv
+}
+
+func TestLoadPluginsCachedKeepsAvailableVersionOverCatalogFile(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [{"name": "foo", "version": "9.9.9"}]}`)
+
+	lv := loadInstalledFixture(t, dir, `{
+		"installed": [{"id": "foo@m1", "version": "1.0.0", "enabled": true, "scope": "user"}],
+		"available": [{"pluginId": "foo@m1", "version": "2.0.0", "source": "./foo"}]
+	}`)
+
+	if v := lv.Versions[PluginID{Name: "foo", Marketplace: "m1"}]; v != "2.0.0" {
+		t.Errorf("foo@m1 = %q, want %q from available", v, "2.0.0")
+	}
+}
+
+func TestLoadPluginsCachedInstalledResolvesFromSourceRef(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [
+		{"name": "tagged", "source": {"source": "github", "ref": "v1.5.5"}},
+		{"name": "branch", "source": {"source": "github", "ref": "main"}},
+		{"name": "string-source", "source": "./s"}
+	]}`)
+
+	lv := loadInstalledFixture(t, dir, `{
+		"installed": [
+			{"id": "tagged@m1", "version": "1.5.0", "enabled": true, "scope": "user"},
+			{"id": "branch@m1", "version": "1.0.0", "enabled": true, "scope": "user"},
+			{"id": "string-source@m1", "version": "1.0.0", "enabled": true, "scope": "user"}
+		],
+		"available": []
+	}`)
+
+	want := map[string]string{"tagged": "v1.5.5", "branch": "", "string-source": ""}
+	for name, version := range want {
+		if v := lv.Versions[PluginID{Name: name, Marketplace: "m1"}]; v != version {
+			t.Errorf("%s@m1 = %q, want %q", name, v, version)
+		}
+	}
+}
+
+func TestLoadPluginsCachedInstalledWithoutCatalogEntryStaysEmpty(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalog(t, dir, `{"plugins": [{"name": "other", "version": "1.0.0"}]}`)
+
+	lv := loadInstalledFixture(t, dir, `{
+		"installed": [{"id": "foo@m1", "version": "1.0.0", "enabled": true, "scope": "user"}],
+		"available": []
+	}`)
+
+	if v := lv.Versions[PluginID{Name: "foo", Marketplace: "m1"}]; v != "" {
+		t.Errorf("foo@m1 = %q, want empty", v)
+	}
+}

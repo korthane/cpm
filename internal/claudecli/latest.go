@@ -91,7 +91,9 @@ func LoadPluginsFresh(ctx context.Context, r Runner, profileDir string) (PluginD
 // refresh; post-action refreshes use it because the catalog was refreshed
 // moments earlier by the initial load. Catalog entries without a usable
 // version (branch refs, bare urls) are filled from each marketplace's
-// <installLocation>/.claude-plugin/marketplace.json, best-effort.
+// <installLocation>/.claude-plugin/marketplace.json, best-effort. Installed
+// plugins are resolved the same way: `plugin list --available` leaves them
+// out of `available`, so the catalog file is their only latest-version source.
 func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (PluginData, LatestVersions, error) {
 	data, err := LoadPlugins(ctx, r, profileDir)
 	if err != nil {
@@ -116,6 +118,11 @@ func LoadPluginsCached(ctx context.Context, r Runner, profileDir string) (Plugin
 		// already-resolved one.
 		if lv.Versions[a.ID] == "" {
 			lv.Versions[a.ID] = a.LatestVersion
+		}
+	}
+	for _, p := range data.Installed {
+		if _, ok := lv.Versions[p.ID]; !ok {
+			lv.Versions[p.ID] = ""
 		}
 	}
 	unresolved := false
@@ -175,12 +182,14 @@ func readCatalogFile(installLocation string) map[string]string {
 }
 
 // parseMarketplaceCatalog parses a marketplace.json catalog into plugin
-// name → version (empty when the entry has no version field).
+// name → version, resolved like `available` entries: `version`, else a
+// version-like `source.ref`, else empty.
 func parseMarketplaceCatalog(raw []byte) (map[string]string, error) {
 	var catalog struct {
 		Plugins []struct {
-			Name    string `json:"name"`
-			Version string `json:"version"`
+			Name    string          `json:"name"`
+			Version string          `json:"version"`
+			Source  json.RawMessage `json:"source"`
 		} `json:"plugins"`
 	}
 	if err := json.Unmarshal(raw, &catalog); err != nil {
@@ -188,7 +197,7 @@ func parseMarketplaceCatalog(raw []byte) (map[string]string, error) {
 	}
 	byName := make(map[string]string, len(catalog.Plugins))
 	for _, p := range catalog.Plugins {
-		byName[p.Name] = p.Version
+		byName[p.Name] = latestVersion(availableJSON{Version: p.Version, Source: p.Source})
 	}
 	return byName, nil
 }

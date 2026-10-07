@@ -41,7 +41,7 @@ type InstalledPlugin struct {
 
 // AvailablePlugin is a marketplace catalog entry. LatestVersion is empty when
 // the catalog carries no version (e.g. a branch ref or a bare url source);
-// the marketplace.json fallback in LoadPluginsFresh resolves those.
+// the marketplace.json fallback in LoadPluginsCached resolves those.
 type AvailablePlugin struct {
 	ID            PluginID
 	LatestVersion string
