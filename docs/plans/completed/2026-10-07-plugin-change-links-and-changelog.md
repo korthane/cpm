@@ -23,7 +23,7 @@
 ## Context (from discovery)
 - Files/components involved:
   - `internal/claudecli/plugins.go` (installed/available parsing),
-    `latest.go` (catalog + manifest reads, `readCloneFile`), `gitinfo.go`
+    `latest.go` (catalog + manifest reads, `readConfinedFile`), `gitinfo.go`
     (clone HEAD lookup)
   - `internal/model/matrix.go` (`MergeLatestVersions`, `IsOutdated`,
     `PluginCell`)
@@ -49,7 +49,7 @@
     plugin directory; or absent. Some repos version the changelog by the app,
     not the plugin, so its headings never match plugin versions.
 - Patterns to follow: reads of third-party clone content go through
-  `os.OpenRoot` + `readCloneFile` (regular files only, 1 MiB cap); `model`
+  `os.OpenRoot` + `readConfinedFile` (regular files only, 1 MiB cap); `model`
   stays pure; `gitCommitInfo` is a stubbable package var; `internal/cli` tests
   cannot stub git, and `Sources`/`CommitSHA` are unreachable through
   `FakeRunner` (they come from files and git), so link and changelog tests
@@ -143,8 +143,8 @@
 - `claudecli.PluginSource { RepoURL, Commit, Path, CloneDir string }`;
   `RepoURL` is the raw repo string (`owner/repo`, https or ssh URL).
 - `gitCommitInfo` keeps its 3-value signature but emits `--format=%H %cs`;
-  `Marketplace.HeadSHA` holds the full SHA and `CommitHash` is derived as its
-  first 7 characters for display.
+  `Marketplace.HeadSHA` holds the full SHA; `model.BuildPluginGroups`
+  cuts the 7-character display form (no separate `CommitHash` field).
 - `model.GitHubWebURL(raw string) (string, bool)`.
 - `model.ChangeLinks(src PluginSource, installedSHA string) (compare,
   history string)`: compare needs both commits; history needs a commit and a
@@ -174,7 +174,7 @@
     200 lines with a `… (truncated)` marker.
 - `claudecli.ReadChangelog(src PluginSource) (text, file string, err error)`:
   tries `<Path>/CHANGELOG.md`, then the clone-root `CHANGELOG.md`, via
-  `OpenRoot(CloneDir)` + `readCloneFile`; `file` is the clone-relative path
+  `OpenRoot(CloneDir)` + `readConfinedFile`; `file` is the clone-relative path
   for display.
 - CLI text output (links always, one indented line per install;
   changelog only with `--changelog`, once per plugin, bounded below by the
@@ -297,7 +297,7 @@
 - [x] ➕ `TestMain` in `claudecli` sets `HOME` to an empty temp dir: loads
       for the default profile (`""`) now read
       `~/.claude/plugins/installed_plugins.json`, which must never be the
-      developer's real file in tests; the read reuses `readCloneFile` under
+      developer's real file in tests; the read reuses `readConfinedFile` under
       `os.OpenRoot(<profile>/plugins)` (1 MiB cap); `cli`/`ui` tests that
       start asserting on `CommitSHA` (Tasks 6, 8) need the same guard
 - [x] ➕ review follow-up: the install-path match ignored scope, so a
@@ -328,7 +328,7 @@
       `Marketplace.HeadSHA`, derive the short `CommitHash`; update stub data
 - [x] keep `url`/`repo`/`path`/`sha`/`ref` from catalog entries and fill
       `LatestVersions.Sources`
-- [x] implement `ReadChangelog` via `OpenRoot` + `readCloneFile`
+- [x] implement `ReadChangelog` via `OpenRoot` + `readConfinedFile`
 - [x] run tests - must pass before next task
 - [x] ➕ a source is recorded only alongside a non-empty latest version, by
       the same entry (`LatestVersions.setLatest`); a relative source sets
