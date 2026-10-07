@@ -136,15 +136,17 @@ behavior.
   `model.BuildPluginGroups` for display.
 - `model.LatestSource` picks the source of a profile whose own version
   equals the merged latest (version compare, not string equality), so link
-  and version agree; ties prefer a source with both `RepoURL` and `Commit`
-  (one that can build links), then a non-stale profile, then profile order.
+  and version agree; ties prefer a source that can build links (a GitHub
+  `RepoURL` and a valid `Commit`, the `ChangeLinks` rules), then a
+  non-stale profile, then profile order.
   Matrix/group builders keep their signatures — the UI calls it for the
   selected row only.
 - Link parts are third-party data and the URL may reach the system opener,
   so `model/links.go` validates everything: host exactly `github.com`
-  (case-insensitive; no other userinfo, port, query or fragment), owner/repo
-  `[A-Za-z0-9._-]+` and not `.`/`..`, a commit is a hex SHA or slash-free
-  ref without `..` (a `/` would escape to `%2F`, dots break `a...b`);
+  (case-insensitive; no userinfo but the ssh forms' `git@`, no port, query
+  or fragment), owner/repo `[A-Za-z0-9._-]+` and not `.`/`..`, a commit
+  is a hex SHA or slash-free ref without `..` (a `/` would escape to `%2F`,
+  dots break `a...b`);
   a `refs/tags/` / `refs/heads/` prefix is stripped first. Path segments
   allow any characters but are each `url.PathEscape`d (`%2e%2e` cannot
   traverse); absolute paths and literal `..` segments are refused, empty and

@@ -134,8 +134,8 @@ const (
 
 // LatestSource returns where the merged latest version of a plugin lives:
 // the source of a profile whose own latest equals it (version compare), so
-// link and version agree. Among ties a source with both repo and commit (one
-// that can build links) wins, then a non-stale profile, then the earlier
+// link and version agree. Among ties a source that can build links (a GitHub
+// repo and a valid commit) wins, then a non-stale profile, then the earlier
 // one. ok is false when latest is empty or no such profile has one.
 func LatestSource(perProfile []claudecli.LatestVersions, id claudecli.PluginID,
 	latest string) (claudecli.PluginSource, bool) {
@@ -154,7 +154,7 @@ func LatestSource(perProfile []claudecli.LatestVersions, id claudecli.PluginID,
 			continue
 		}
 		rank := 0
-		if src.RepoURL != "" && src.Commit != "" {
+		if _, _, ok := linkBase(src); ok {
 			rank += linkableRank
 		}
 		if !lv.Stale {

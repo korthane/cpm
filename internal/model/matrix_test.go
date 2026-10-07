@@ -431,6 +431,13 @@ func TestLatestSource(t *testing.T) {
 			Stale:    stale,
 		}
 	}
+	withRepo := func(l claudecli.LatestVersions,
+		repo string) claudecli.LatestVersions {
+		s := l.Sources[p]
+		s.RepoURL = repo
+		l.Sources = map[claudecli.PluginID]claudecli.PluginSource{p: s}
+		return l
+	}
 	// incomplete is a relative source whose git lookup failed: it has a
 	// clone to read but no repo or commit for links.
 	incomplete := func(stale bool) claudecli.LatestVersions {
@@ -497,6 +504,21 @@ func TestLatestSource(t *testing.T) {
 				incomplete(false), lv("2.0.0", "stale", true),
 			},
 			latest: "2.0.0", want: "stale", wantOK: true,
+		},
+		{
+			name: "tie skips a source whose repo is not on GitHub",
+			perProfile: []claudecli.LatestVersions{
+				withRepo(lv("2.0.0", "gitlab", false), "https://gitlab.com/o/r"),
+				lv("2.0.0", "github", true),
+			},
+			latest: "2.0.0", want: "github", wantOK: true,
+		},
+		{
+			name: "tie skips a source whose commit cannot be linked",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", "a..b", false), lv("2.0.0", "valid", true),
+			},
+			latest: "2.0.0", want: "valid", wantOK: true,
 		},
 		{
 			name: "source without links still beats none",

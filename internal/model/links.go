@@ -51,8 +51,8 @@ func githubRepoPath(s string) (string, bool) {
 		return "", false
 	}
 	if userHost, p, ok := strings.Cut(s, ":"); ok {
-		_, host, hasUser := strings.Cut(userHost, "@")
-		return p, hasUser && strings.EqualFold(host, githubHost)
+		host, isGit := strings.CutPrefix(userHost, "git@")
+		return p, isGit && strings.EqualFold(host, githubHost)
 	}
 	return s, s != ""
 }
@@ -85,9 +85,8 @@ func sameCommit(a, b string) bool {
 // non-GitHub repo or an invalid latest commit. The parts are third-party
 // data and the URL may reach the system opener, so each is validated.
 func ChangeLinks(src claudecli.PluginSource, installedSHA string) (compare, history string) {
-	base, ok := GitHubWebURL(src.RepoURL)
-	latest := shortRef(src.Commit)
-	if !ok || !validCommit(latest) {
+	base, latest, ok := linkBase(src)
+	if !ok {
 		return "", ""
 	}
 	if validCommit(installedSHA) && !sameCommit(installedSHA, latest) {
@@ -97,6 +96,14 @@ func ChangeLinks(src claudecli.PluginSource, installedSHA string) (compare, hist
 		history = base + "/commits/" + latest + "/" + p
 	}
 	return compare, history
+}
+
+// linkBase returns src's GitHub web URL and latest commit, ok=false when
+// either cannot be put in a link.
+func linkBase(src claudecli.PluginSource) (base, latest string, ok bool) {
+	base, ok = GitHubWebURL(src.RepoURL)
+	latest = shortRef(src.Commit)
+	return base, latest, ok && validCommit(latest)
 }
 
 // shortRef strips the refs/tags/ or refs/heads/ prefix a catalog may give,

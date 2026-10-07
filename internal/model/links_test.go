@@ -49,6 +49,9 @@ func TestGitHubWebURL(t *testing.T) {
 		{"bare lookalike host", "github.com.evil.example/acme/widgets", "", false},
 		{"prefixed lookalike", "https://evilgithub.com/acme/widgets", "", false},
 		{"scp lookalike", "git@evilgithub.com:acme/widgets.git", "", false},
+		{"scp other user", "evil@github.com:acme/widgets.git", "", false},
+		{"scp no user", "github.com:acme/widgets.git", "", false},
+		{"scp host case ignored", "git@GitHub.com:acme/widgets.git", want, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
