@@ -1168,7 +1168,13 @@ func (m Model) View() string {
 		b.WriteString(m.viewMCP())
 	}
 
-	link := m.selectedChangeLink()
+	// Resolve the selection once: each lookup rebuilds the filtered groups.
+	var sel pluginSelection
+	var selOK bool
+	if m.tab == tabPlugins {
+		sel, selOK = m.selectedPluginRef()
+	}
+	link := m.changeLink(sel, selOK)
 	b.WriteString("\n")
 	b.WriteString(m.statusLine(link))
 	// Help lines are width-capped like the status line: chromeLines budgets
@@ -1187,7 +1193,7 @@ func (m Model) View() string {
 	switch {
 	case m.tab == tabMCP:
 		actions = "x: remove"
-	case m.selectedMarketplaceRow():
+	case selOK && sel.ref.kind == rowMarketplace:
 		actions = "i: add  u: update  x: remove"
 		// Folding is disabled while a filter is applied (see toggleFold).
 		if m.filters[tabPlugins] == "" {
@@ -1202,13 +1208,6 @@ func (m Model) View() string {
 	}
 	b.WriteString("\n" + m.fitWidth(nav) + "\n" + m.fitWidth(actions) + "\n")
 	return b.String()
-}
-
-// selectedMarketplaceRow reports whether the plugins-tab selection sits on a
-// marketplace header row; the second footer help line follows the row kind.
-func (m Model) selectedMarketplaceRow() bool {
-	sel, ok := m.selectedPluginRef()
-	return ok && sel.ref.kind == rowMarketplace
 }
 
 // pluginSelection is the plugins-tab row under the selection: the filtered
@@ -1300,7 +1299,12 @@ func (m Model) selectedChangeLink() string {
 	if m.tab != tabPlugins {
 		return ""
 	}
-	sel, ok := m.selectedPluginRef()
+	return m.changeLink(m.selectedPluginRef())
+}
+
+// changeLink is selectedChangeLink for an already resolved selection; ok is
+// false when there is none.
+func (m Model) changeLink(sel pluginSelection, ok bool) string {
 	if !ok || sel.ref.kind == rowMarketplace {
 		return ""
 	}

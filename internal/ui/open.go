@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -10,6 +9,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/korthane/cpm/internal/model"
 )
 
 // openWait bounds how long an opener may run before it counts as having
@@ -22,12 +23,12 @@ const openWait = 5 * time.Second
 var errNotGitHubURL = errors.New("not a GitHub URL")
 
 // openURL opens a URL in the browser; tests swap it so they never launch one.
-var openURL = func(ctx context.Context, url string) error {
+var openURL = func(url string) error {
 	opener := "xdg-open"
 	if runtime.GOOS == "darwin" {
 		opener = "open"
 	}
-	return openWith(ctx, opener, openWait, url)
+	return openWith(opener, openWait, url)
 }
 
 // openWith runs opener on url, refusing anything that is not an
@@ -35,9 +36,8 @@ var openURL = func(ctx context.Context, url string) error {
 // stays detached so it cannot write over the Bubble Tea screen. An early
 // exit reports the opener's status; one still running after wait is left
 // running (and reaped) and reported as success.
-func openWith(ctx context.Context, opener string, wait time.Duration,
-	url string) error {
-	if !strings.HasPrefix(url, "https://github.com/") {
+func openWith(opener string, wait time.Duration, url string) error {
+	if !strings.HasPrefix(url, model.GitHubWebPrefix) {
 		return fmt.Errorf("refusing to open %q: %w", url, errNotGitHubURL)
 	}
 	cmd := exec.Command(opener, url)
@@ -53,8 +53,6 @@ func openWith(ctx context.Context, opener string, wait time.Duration,
 		return err
 	case <-timer.C:
 		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
 
@@ -67,6 +65,6 @@ type openDoneMsg struct {
 // openLink opens url off the event loop.
 func openLink(url string) tea.Cmd {
 	return func() tea.Msg {
-		return openDoneMsg{url: url, err: openURL(context.Background(), url)}
+		return openDoneMsg{url: url, err: openURL(url)}
 	}
 }

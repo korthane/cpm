@@ -70,6 +70,8 @@ behavior.
   developer's real file. The `ui` one also replaces `openURL` with a stub
   that counts calls and fails the whole run when any test reached it, so an
   `o` press without `stubOpener` cannot pass silently or open a browser.
+  The HOME setup is copied, not shared, to keep it test-only; keep the
+  three copies in sync.
 - `LatestVersions.Sources` and `InstalledPlugin.CommitSHA` come from files
   and git, not from `FakeRunner`, so link and changelog tests in `cli` (a
   `package cli` test) build `[]profileLoad` values directly; changelog tests
@@ -103,7 +105,7 @@ behavior.
   it gets a latest version only from an entry `version` or a version-like
   `source.ref`, and without either it is never reported outdated.
 - Marketplace clones are third-party git content, so catalog and manifest
-  reads go through `os.OpenRoot(installLocation)` (`readCloneFile`): paths
+  reads go through `os.OpenRoot(installLocation)` (`readConfinedFile`): paths
   and symlinks escaping the clone are refused, only regular files are read
   (`Stat` before `Open` — opening a FIFO blocks), capped at 1 MiB. These
   reads take no ctx, so they must never block. `ReadChangelog` (plugin-dir
@@ -113,7 +115,7 @@ behavior.
   `<profile>/plugins/installed_plugins.json` (`installed_commits.go`;
   `""` profile → `~/.claude`). Read-only and best-effort: any failure leaves
   SHAs empty and only drops links. Only `"version": 2` is understood. The
-  read reuses `readCloneFile` under `os.OpenRoot(<profile>/plugins)`. A
+  read reuses `readConfinedFile` under `os.OpenRoot(<profile>/plugins)`. A
   record counts only within the install's scope (a project install must not
   take a user record's SHA at the same path): records at the same install
   path (symlinks resolved) yield the SHA their non-empty values agree on —
@@ -163,9 +165,9 @@ behavior.
   oldest-first files work and truncation keeps the newest. No latest
   heading → `ok=false`. `ReadChangelog` falls back to the clone-root file
   for a subdirectory plugin; with plain headings that file may version
-  something else (README known limitation). Lines inside ``` / ~~~ fences are never
-  headings; a ``` line whose info string contains a backtick is an inline
-  code span, not a fence (CommonMark). Capped at 200 lines.
+  something else (README known limitation). Lines inside ``` / ~~~ fences
+  are never headings; a ``` line whose info string contains a backtick is
+  an inline code span, not a fence (CommonMark). Capped at 200 lines.
 - The TUI opener (`internal/ui/open.go`: `openURL` is the only test hook,
   `openWith` the testable core) refuses any URL not starting with
   `https://github.com/` — on macOS `open` also launches files and apps —

@@ -126,6 +126,12 @@ func MergeLatestVersions(perProfile []claudecli.LatestVersions) (map[claudecli.P
 	return latest, stale
 }
 
+// LatestSource tie ranks: linkable outweighs fresh, so they cannot tie.
+const (
+	freshRank    = 1
+	linkableRank = 2
+)
+
 // LatestSource returns where the merged latest version of a plugin lives:
 // the source of a profile whose own latest equals it (version compare), so
 // link and version agree. Among ties a source with both repo and commit (one
@@ -149,10 +155,10 @@ func LatestSource(perProfile []claudecli.LatestVersions, id claudecli.PluginID,
 		}
 		rank := 0
 		if src.RepoURL != "" && src.Commit != "" {
-			rank += 2
+			rank += linkableRank
 		}
 		if !lv.Stale {
-			rank++
+			rank += freshRank
 		}
 		if rank > bestRank {
 			found, bestRank = src, rank

@@ -42,9 +42,10 @@ var gitCommitInfo = func(ctx context.Context, dir string) (hash, date string, er
 	return hash, date, nil
 }
 
-// fillCommitInfo stamps each marketplace with its clone's HEAD SHA and date — marketplaces have no version field, so this is the only
-// freshness signal. Best-effort: any git failure (directory source that is not a repo,
-// git missing) leaves the fields blank.
+// fillCommitInfo stamps each marketplace with its clone's HEAD SHA and
+// date — marketplaces have no version field, so this is the only freshness
+// signal. Best-effort: any git failure (directory source that is not a
+// repo, git missing) leaves the fields blank.
 func fillCommitInfo(ctx context.Context, markets []Marketplace) {
 	for i := range markets {
 		if markets[i].InstallLocation == "" {

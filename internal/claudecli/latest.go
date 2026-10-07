@@ -262,7 +262,7 @@ func readCloneCatalog(installLocation string) map[string]catalogVersions {
 		return nil
 	}
 	defer func() { _ = root.Close() }()
-	raw, err := readCloneFile(root,
+	raw, err := readConfinedFile(root,
 		filepath.Join(".claude-plugin", "marketplace.json"))
 	if err != nil {
 		return nil
@@ -289,11 +289,11 @@ func readCloneCatalog(installLocation string) map[string]catalogVersions {
 	return byName
 }
 
-// readCloneFile reads a regular file of at most maxCatalogFileBytes inside
-// root. The clone is third-party git content: Root refuses paths and
-// symlinks that escape it, and anything but a small regular file is refused
-// so a FIFO or huge file cannot hang the load or exhaust memory.
-func readCloneFile(root *os.Root, name string) ([]byte, error) {
+// readConfinedFile reads a regular file of at most maxCatalogFileBytes
+// inside root. Root refuses paths and symlinks that escape it, and anything
+// but a small regular file is refused so a FIFO or huge file cannot hang
+// the load or exhaust memory.
+func readConfinedFile(root *os.Root, name string) ([]byte, error) {
 	// Stat before Open: opening a FIFO blocks until a writer appears.
 	info, err := root.Stat(name)
 	if err != nil {
@@ -344,7 +344,7 @@ func manifestVersion(root *os.Root, source json.RawMessage) string {
 	if json.Unmarshal(source, &rel) != nil || rel == "" {
 		return ""
 	}
-	raw, err := readCloneFile(root,
+	raw, err := readConfinedFile(root,
 		filepath.Join(rel, ".claude-plugin", "plugin.json"))
 	if err != nil {
 		return ""

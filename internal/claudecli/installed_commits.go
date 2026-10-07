@@ -22,7 +22,8 @@ const installedPluginsVersion = 2
 // not expose. An install matches the records with the same id, scope and
 // install path (compared after resolving symlinks), else the only record of
 // that id and scope. The read is best-effort: any failure, no match or an
-// ambiguous one leaves CommitSHA empty. cpm only reads this file, never writes it.
+// ambiguous one leaves CommitSHA empty. cpm only reads this file, never
+// writes it.
 func fillInstalledCommits(profileDir string, installed []InstalledPlugin) {
 	if len(installed) == 0 {
 		return
@@ -53,9 +54,7 @@ func readInstallRecords(profileDir string) map[string][]installRecord {
 		return nil
 	}
 	defer func() { _ = root.Close() }()
-	// Reuse the clone-read hardening: a stray FIFO or huge file must not
-	// hang or bloat a load. Real files are a few KiB, far below the cap.
-	raw, err := readCloneFile(root, "installed_plugins.json")
+	raw, err := readConfinedFile(root, "installed_plugins.json")
 	if err != nil {
 		return nil
 	}

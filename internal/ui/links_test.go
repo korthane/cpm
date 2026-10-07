@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -89,7 +88,7 @@ func stubOpener(t *testing.T, err error) *[]string {
 	t.Helper()
 	var opened []string
 	prev := openURL
-	openURL = func(_ context.Context, url string) error {
+	openURL = func(url string) error {
 		opened = append(opened, url)
 		return err
 	}
@@ -299,8 +298,7 @@ func TestOpenWithRefusesNonGitHubURLs(t *testing.T) {
 		"https://example.com/", "file:///etc/passwd", "/Applications/Foo.app",
 		"https://github.com", "-a Calculator",
 	} {
-		err := openWith(context.Background(), "/nonexistent/opener",
-			time.Second, url)
+		err := openWith("/nonexistent/opener", time.Second, url)
 		if !errors.Is(err, errNotGitHubURL) {
 			t.Errorf("openWith(%q) = %v, want errNotGitHubURL", url, err)
 		}
@@ -308,14 +306,13 @@ func TestOpenWithRefusesNonGitHubURLs(t *testing.T) {
 }
 
 func TestOpenWithReportsOpenerExit(t *testing.T) {
-	ctx := context.Background()
-	if err := openWith(ctx, "true", time.Second, compareURL); err != nil {
+	if err := openWith("true", time.Second, compareURL); err != nil {
 		t.Errorf("succeeding opener = %v, want nil", err)
 	}
-	if err := openWith(ctx, "false", time.Second, compareURL); err == nil {
+	if err := openWith("false", time.Second, compareURL); err == nil {
 		t.Error("failing opener = nil, want error")
 	}
-	if err := openWith(ctx, "/nonexistent/opener", time.Second,
+	if err := openWith("/nonexistent/opener", time.Second,
 		compareURL); err == nil {
 		t.Error("missing opener = nil, want error")
 	}
@@ -330,8 +327,7 @@ func TestOpenWithTreatsLongRunningOpenerAsOpened(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	err := openWith(context.Background(), script, 50*time.Millisecond,
-		compareURL)
+	err := openWith(script, 50*time.Millisecond, compareURL)
 	if err != nil {
 		t.Errorf("long-running opener = %v, want nil", err)
 	}

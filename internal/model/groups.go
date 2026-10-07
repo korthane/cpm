@@ -10,6 +10,11 @@ import (
 // shortHashLen is the displayed hash length, git's usual abbreviation.
 const shortHashLen = 7
 
+// shortHash abbreviates a commit SHA for display.
+func shortHash(sha string) string {
+	return sha[:min(shortHashLen, len(sha))]
+}
+
 // MarketplaceCell is one profile's state for a marketplace row. Commit info
 // is empty when the loader's git lookup failed or the marketplace is not
 // configured in that profile.
@@ -72,7 +77,7 @@ func BuildPluginGroups(perProfile []claudecli.PluginData, latest map[claudecli.P
 			row := ensure(mkt.Name)
 			row.Cells[i] = MarketplaceCell{
 				Configured: true,
-				CommitHash: mkt.HeadSHA[:min(shortHashLen, len(mkt.HeadSHA))],
+				CommitHash: shortHash(mkt.HeadSHA),
 				CommitDate: mkt.CommitDate,
 				Local:      mkt.Source == "directory",
 			}

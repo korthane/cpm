@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -25,7 +24,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	openURL = func(context.Context, string) error {
+	openURL = func(string) error {
 		unstubbedOpens.Add(1)
 		return errors.New("test did not stub openURL")
 	}

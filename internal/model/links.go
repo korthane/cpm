@@ -10,6 +10,9 @@ import (
 
 const githubHost = "github.com"
 
+// GitHubWebPrefix starts every URL GitHubWebURL and ChangeLinks build.
+const GitHubWebPrefix = "https://" + githubHost + "/"
+
 var (
 	repoPartPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 	hexSHAPattern   = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
@@ -29,7 +32,7 @@ func GitHubWebURL(raw string) (string, bool) {
 	if !ok || !validRepoPart(owner) || !validRepoPart(repo) {
 		return "", false
 	}
-	return "https://" + githubHost + "/" + owner + "/" + repo, true
+	return GitHubWebPrefix + owner + "/" + repo, true
 }
 
 // githubRepoPath strips the scheme and github.com host from s, returning the

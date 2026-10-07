@@ -93,6 +93,8 @@ func attachChangelogs(outdated []outdatedPlugin) {
 	}
 }
 
+// readPluginChangelog reads src's changelog excerpt for (since, latest], or
+// why there is none to show.
 func readPluginChangelog(src claudecli.PluginSource,
 	plugin, since, latest string) *pluginChangelog {
 	// A remote source, or a relative one whose clone was never located
@@ -103,7 +105,7 @@ func readPluginChangelog(src claudecli.PluginSource,
 	// Any read failure (absent, unreadable, refused) leaves nothing to show.
 	text, file, err := claudecli.ReadChangelog(src)
 	if err != nil {
-		return &pluginChangelog{missing: "no CHANGELOG.md"}
+		return &pluginChangelog{missing: "no " + claudecli.ChangelogName}
 	}
 	excerpt, ok := model.ChangelogExcerpt(text, plugin, since, latest)
 	if !ok {
