@@ -6,8 +6,9 @@
   the latest version, and an optional changelog excerpt.
 - **Compare link**: a GitHub compare URL built from the installed commit and
   the commit the latest version comes from:
-  `https://github.com/<owner>/<repo>/compare/<installed>...<latest>`. It is
-  exact (no tags or version-string guessing), offline and per install.
+  `https://github.com/<owner>/<repo>/compare/<installed>...<latest>`. It
+  needs no tags or version-string guessing, is offline and per install, and
+  is exact when both ends are pinned SHAs (a ref fallback is best-effort).
 - **History link**: for a plugin living in a subdirectory (multi-plugin
   repos), `https://github.com/<owner>/<repo>/commits/<latest>/<path>`, since
   a compare page cannot be filtered by path and also lists other plugins'
@@ -102,7 +103,9 @@
     repo and the clone's full HEAD SHA when known (empty otherwise, which
     just yields no links);
   - remote source: its repo URL, `sha` (else `ref`) and `path`; no clone dir,
-    so no changelog.
+    so no changelog. The `ref` fallback is best-effort: a branch ref can move
+    after the catalog was loaded, so links are exact only when both ends are
+    pinned SHAs.
 - **Merging**: the source comes from a profile that supplied the winning
   latest version (`model.LatestSource`), so link and version agree. Ties
   (equal under the version compare) prefer a non-stale profile, then profile
@@ -110,17 +113,23 @@
   `LatestSource` for the selected row only.
 - **Links** are built in `model` (pure): repo strings are normalized to a
   GitHub web URL only for `github.com` (https, `git@github.com:`, `ssh://`,
-  bare `owner/repo`); everything else yields no link. Owner/repo, commits and
-  path segments are validated (`[A-Za-z0-9._-]`, hex SHAs or plain ref names,
-  no `..`) and path segments escaped, because the parts are third-party data
-  and the URL is later passed to the system opener. Exact rules:
-  - host `github.com` compared case-insensitively; owner/repo match
-    `[A-Za-z0-9._-]+` and are not `.` or `..`;
+  bare `owner/repo`); everything else yields no link. Owner/repo and commits
+  are validated (`[A-Za-z0-9._-]`, hex SHAs or plain ref names, no `..`) and
+  path segments escaped, because the parts are third-party data and the URL
+  is later passed to the system opener. Exact rules:
+  - the host must be exactly `github.com` (compared case-insensitively);
+    userinfo (other than the `git@` of the ssh forms), ports, query and
+    fragment are refused, so look-alike and `user@host` tricks never pass;
+  - owner/repo match `[A-Za-z0-9._-]+` and are not `.` or `..`;
   - a commit is a hex SHA (7–40 chars) or a slash-free ref matching
     `[A-Za-z0-9._-]+` without `..` (a `/` would be escaped to `%2F` and a
     `...` would break the `a...b` compare syntax);
-  - the path is trimmed of `./`, `path.Clean`ed, refused when absolute or
-    containing `..`; `.` means the repo root (no history link);
+  - path segments are not restricted to the owner/repo alphabet: any
+    characters are allowed and each segment is `url.PathEscape`d (so `%2e%2e`
+    becomes `%252e%252e` and cannot traverse); only absolute paths and
+    original `..` segments are refused, checked before `path.Clean`; only a
+    literal leading `./` is trimmed; `.` means the repo root (no history
+    link);
   - no compare link when the installed SHA equals the latest commit.
 - **Changelog** extraction is a pure `model` function over the file text; the
   read stays in `claudecli` (`ReadChangelog`) through `OpenRoot`.
@@ -137,7 +146,8 @@
 - `model.GitHubWebURL(raw string) (string, bool)`.
 - `model.ChangeLinks(src PluginSource, installedSHA string) (compare,
   history string)`: compare needs both commits; history needs a commit and a
-  non-root path; either may be empty.
+  non-root path; either may be empty. `src.Commit` is a SHA when the source
+  pins one, else a ref (best-effort: a branch may have moved since load).
 - `model.ChangelogExcerpt(text, plugin, installed, latest string)
   (excerpt string, ok bool)`:
   - a *version heading* is an ATX heading (`#`–`###`) whose first word is a
@@ -207,17 +217,21 @@
 - Create: `internal/model/links_test.go`
 - Modify: `internal/claudecli/latest.go` (add `PluginSource` type only)
 
-- [ ] write table tests for `GitHubWebURL`: `owner/repo`, https with and
+- [x] write table tests for `GitHubWebURL`: `owner/repo`, https with and
       without `.git`, `git@github.com:o/r.git`, `ssh://git@github.com/o/r.git`;
       rejects non-GitHub hosts, extra path segments, empty, bad characters
-- [ ] write table tests for `ChangeLinks`: both links; no installed SHA (no
+- [x] write table tests for `ChangeLinks`: both links; no installed SHA (no
       compare); root path (no history); ref instead of SHA; invalid commit or
       `..` in path → no link; path segments escaped; ref with `/` or `...`
       refused; `./plugins/x` cleaned; owner `..` refused; host case
       ignored; installed SHA equal to latest → no compare
-- [ ] add `claudecli.PluginSource` and implement `GitHubWebURL` and
+- [x] add `claudecli.PluginSource` and implement `GitHubWebURL` and
       `ChangeLinks` in `internal/model/links.go`
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
+- [x] ➕ review follow-up: targeted tests for `.`/`..` commits, ports,
+      query/fragment, deceptive userinfo and look-alike hosts, and
+      percent-encoded traversal in history paths (escaped, not decoded);
+      plan wording for path, URL-form and ref-fallback rules
 
 ### Task 2: Changelog excerpt parser (model)
 

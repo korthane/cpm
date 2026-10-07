@@ -56,6 +56,20 @@ type LatestVersions struct {
 	Stale bool
 }
 
+// PluginSource is where a plugin's latest version lives. Any field may be
+// empty when unknown; consumers derive links and changelog reads from it.
+type PluginSource struct {
+	// RepoURL is the raw repo string: `owner/repo`, an https or ssh URL.
+	RepoURL string
+	// Commit is the SHA (or, failing that, a ref) of the latest version.
+	Commit string
+	// Path is the plugin's directory relative to the repo root.
+	Path string
+	// CloneDir is the local marketplace clone holding the plugin; empty
+	// for remote sources.
+	CloneDir string
+}
+
 // ListMarketplaces fetches the marketplaces configured in a profile.
 func ListMarketplaces(ctx context.Context, r Runner, profileDir string) ([]Marketplace, error) {
 	out, err := r.Run(ctx, profileDir, "plugin", "marketplace", "list", "--json")
