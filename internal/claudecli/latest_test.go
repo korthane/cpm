@@ -621,3 +621,43 @@ func TestLoadPluginsCachedInstalledWithoutCatalogEntryStaysEmpty(t *testing.T) {
 		t.Errorf("foo@m1 = %q, want empty", v)
 	}
 }
+
+func TestRefreshMarketplacesRunsUpdateForDir(t *testing.T) {
+	f := &FakeRunner{}
+
+	if err := RefreshMarketplaces(t.Context(), f, "/home/u/.claude"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(f.Calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(f.Calls))
+	}
+	got := f.Calls[0]
+	if got.ProfileDir != "/home/u/.claude" ||
+		strings.Join(got.Args, " ") != "plugin marketplace update" {
+		t.Errorf("call = %+v, want plugin marketplace update in /home/u/.claude", got)
+	}
+}
+
+func TestRefreshMarketplacesReturnsError(t *testing.T) {
+	boom := errors.New("git remote unreachable")
+	f := &FakeRunner{
+		Responses: map[string]FakeResponse{
+			"plugin marketplace update": {Err: boom},
+		},
+	}
+
+	if err := RefreshMarketplaces(t.Context(), f, "/d"); !errors.Is(err, boom) {
+		t.Errorf("err = %v, want %v", err, boom)
+	}
+}
+
+func TestRefreshMarketplacesBoundsWithOwnDeadline(t *testing.T) {
+	r := &deadlineRecordingRunner{hasDeadline: map[string]bool{}}
+
+	if err := RefreshMarketplaces(t.Context(), r, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !r.hasDeadline["plugin marketplace update"] {
+		t.Error("marketplace update ran without its own deadline")
+	}
+}

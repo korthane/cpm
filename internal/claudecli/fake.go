@@ -4,14 +4,14 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // FakeRunner is a test double for Runner. It returns canned responses keyed by
 // the space-joined args and records every invocation. It lives outside a
 // _test.go file so tests in other packages (config, ui) can inject it too.
-// Not safe for concurrent use: tests drive Model.Update directly, so commands
-// run sequentially; driving a real tea.Program with it (batched commands run
-// in parallel goroutines) would race on Calls.
+// Run is safe for concurrent use (the CLI loads profiles in parallel); read
+// Calls only after the goroutines calling Run have finished.
 type FakeRunner struct {
 	// Responses maps a space-joined args string to the canned result.
 	Responses map[string]FakeResponse
@@ -25,6 +25,8 @@ type FakeRunner struct {
 	Default FakeResponse
 	// Calls records every invocation in order.
 	Calls []FakeCall
+
+	mu sync.Mutex
 }
 
 // FakeResponse is the canned stdout/error for a matched invocation.
@@ -41,7 +43,9 @@ type FakeCall struct {
 
 // Run records the call and returns the matching canned response, or Default.
 func (f *FakeRunner) Run(_ context.Context, profileDir string, args ...string) ([]byte, error) {
+	f.mu.Lock()
 	f.Calls = append(f.Calls, FakeCall{ProfileDir: profileDir, Args: slices.Clone(args)})
+	f.mu.Unlock()
 	key := strings.Join(args, " ")
 	if resp, ok := f.ResponsesByDir[profileDir][key]; ok {
 		return resp.Stdout, resp.Err

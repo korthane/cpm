@@ -226,18 +226,18 @@
 - Modify: `internal/claudecli/fake.go`
 - Modify: `internal/claudecli/runner_test.go` (or a new `fake_test.go`)
 
-- [ ] write a failing test for `RefreshMarketplaces`: it issues
+- [x] write a failing test for `RefreshMarketplaces`: it issues
   `plugin marketplace update` for the dir, returns the error on failure, and
   is bounded by `refreshTimeout` (reuse the
   `TestLoadPluginsFreshBoundsRefreshWithOwnDeadline` pattern)
-- [ ] implement `RefreshMarketplaces(ctx, r, dir) error` and make
+- [x] implement `RefreshMarketplaces(ctx, r, dir) error` and make
   `LoadPluginsFresh` call it; the existing `LoadPluginsFresh` tests must stay
   green
-- [ ] write a test calling `FakeRunner.Run` from many goroutines and checking
+- [x] write a test calling `FakeRunner.Run` from many goroutines and checking
   that `len(Calls)` is exact; run it with `-race`
-- [ ] add a `sync.Mutex` to `FakeRunner` around the `Calls` append and update
+- [x] add a `sync.Mutex` to `FakeRunner` around the `Calls` append and update
   its "not safe for concurrent use" doc comment
-- [ ] run `make test` and `go test -race ./internal/claudecli/...` - must pass
+- [x] run `make test` and `go test -race ./internal/claudecli/...` - must pass
   before next task
 
 ### Task 3: CLI argument parsing and Run skeleton

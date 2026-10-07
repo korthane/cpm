@@ -67,6 +67,15 @@ func ListMarketplaces(ctx context.Context, r Runner, profileDir string) ([]Marke
 	return markets, nil
 }
 
+// RefreshMarketplaces runs `plugin marketplace update` for the profile under
+// refreshTimeout, so a hung git remote cannot eat the caller's whole budget.
+func RefreshMarketplaces(ctx context.Context, r Runner, profileDir string) error {
+	ctx, cancel := context.WithTimeout(ctx, refreshTimeout)
+	defer cancel()
+	_, err := r.Run(ctx, profileDir, "plugin", "marketplace", "update")
+	return err
+}
+
 // LoadPluginsFresh refreshes the profile's marketplaces (user requirement:
 // never trust a stale cache) and then loads its plugin data, so the returned
 // latest versions are resolved from the fresh catalog with a single
@@ -74,9 +83,7 @@ func ListMarketplaces(ctx context.Context, r Runner, profileDir string) ([]Marke
 // cut off by refreshTimeout — does not fail the load: the cached catalog is
 // used and Stale is set so the UI can flag the values.
 func LoadPluginsFresh(ctx context.Context, r Runner, profileDir string) (PluginData, LatestVersions, error) {
-	refreshCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
-	_, refreshErr := r.Run(refreshCtx, profileDir, "plugin", "marketplace", "update")
-	cancel()
+	refreshErr := RefreshMarketplaces(ctx, r, profileDir)
 
 	data, lv, err := LoadPluginsCached(ctx, r, profileDir)
 	if err != nil {
