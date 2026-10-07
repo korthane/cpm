@@ -390,21 +390,21 @@ in Task 1.
   (`go test -cover ./internal/...`)
 
 ### Task 8: [Final] Update documentation
-- [ ] README.md: add a "Command-line mode" section covering:
+- [x] README.md: add a "Command-line mode" section covering:
   - the `outdated` and `refresh` commands, their flags, and text and JSON
     examples
   - exit codes and stream usage
   - that `unknown` installed versions are never reported
   - that a CLI refresh is not coordinated with a TUI running on the same
     profile
-- [ ] CLAUDE.md:
+- [x] CLAUDE.md:
   - note that `plugin list --available` leaves installed plugins out (why
     installed IDs are added to the version map) and the `source.ref` catalog
     fallback
   - describe `internal/cli` in Architecture and add it to the 80% coverage
     bar
   - note that `FakeRunner` is now concurrency-safe in Testing conventions
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move plan to completed/ (done by orchestrator after reviews)
 
 ## Post-Completion
 *Items requiring manual intervention or external systems - no checkboxes, informational only*

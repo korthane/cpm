@@ -69,10 +69,12 @@ make run     # go run ./cmd/cpm
 cpm                              # auto-discover ~/.claude* profiles
 cpm ~/.claude ~/.claude-work     # show only these profiles, in this order
 cpm -h                           # print usage
+cpm outdated                     # non-interactive: see Command-line mode
 ```
 
-cpm takes no flags other than `-h`/`--help`; any other dashed argument is
-rejected as a typo rather than treated as a profile directory.
+Without a command, cpm takes no flags other than `-h`/`--help`; any other
+dashed argument is rejected as a typo rather than treated as a profile
+directory.
 
 On start the table shell renders immediately and every profile column loads in
 parallel (a per-column spinner shows until its data arrives). Loading a profile
@@ -231,3 +233,106 @@ directory instead.
   with the CLI's error; use `claude mcp remove` in the owning directory for
   those. Plugin-provided servers cannot be removed this way either; cpm blocks
   the action and suggests uninstalling the plugin.
+
+## Command-line mode
+
+A command as the first argument makes cpm print a result and exit instead of
+starting the TUI — for scripts, agents and quick checks:
+
+```sh
+cpm outdated [--refresh] [--text|--json] [<profile-dir> ...]
+cpm refresh  [--text|--json] [<profile-dir> ...]
+cpm <command> --help
+```
+
+Profiles resolve exactly as for the TUI (args > config file >
+auto-discovery). Flags and profile dirs may be interleaved; `--text` (the
+default) and `--json` are mutually exclusive. A profile dir named like a
+command is reached as `./outdated`. Profiles load in parallel, each bounded
+by the same two-minute timeout as the TUI, and one failing profile does not
+stop the others.
+
+### `cpm outdated`
+
+Lists every installed plugin whose version is behind the newest version
+found in any profile's marketplace catalog, with the profiles holding the
+old version. It reads the cached catalogs; `--refresh` runs
+`claude plugin marketplace update` in each profile first (if that fails, the
+cached catalog is used and a warning is printed). Every installed entry is
+checked, so a plugin installed at both user and project scope in one profile
+is reported if either install is behind. Installs whose version the CLI
+reports as `unknown` are never reported — there is nothing to compare.
+
+```text
+$ cpm outdated
+bar@acme  latest 6.4.1
+  work  6.3.0  (disabled)
+foo@acme  latest 0.35.1
+  home  0.34.0
+  work  0.34.0
+```
+
+Plugins are sorted by marketplace, then name; installs follow profile order.
+Profiles are shown by label (path when there is none); an install at a
+non-`user` scope is marked `(scope: project)`. With nothing outdated it
+prints `all plugins up to date` — unless a profile failed to load, in which
+case stdout stays empty, since nothing proves that profile is current.
+
+```sh
+$ cpm outdated --json
+```
+
+```json
+{
+  "profiles": [
+    {"label": "home", "path": "/home/me/.claude", "refresh": "skipped", "error": ""},
+    {"label": "work", "path": "/home/me/.claude-work", "refresh": "skipped", "error": ""}
+  ],
+  "outdated": [
+    {"plugin": "foo@acme", "latest": "0.35.1",
+     "installs": [
+       {"label": "home", "path": "/home/me/.claude", "version": "0.34.0",
+        "scope": "user", "enabled": true}
+     ]}
+  ]
+}
+```
+
+(Pretty-printed here; the actual output is one line.) `outdated` is always
+an array, never `null`. `refresh` is `skipped` (no `--refresh`, or the
+profile failed to load), `ok`, or `failed` (stale catalog used); `error` is
+empty unless the profile failed to load.
+
+### `cpm refresh`
+
+Runs `claude plugin marketplace update` in every profile and reports each
+result:
+
+```text
+$ cpm refresh
+home  ok
+work  ok
+```
+
+A failed profile goes to stderr as `error: work: <message>`. With `--json`:
+`{"profiles":[{"label":"home","path":"/home/me/.claude","error":""}, ...]}`.
+
+A refresh writes to the profile's marketplace clones and is not coordinated
+with other processes: avoid running it (or `outdated --refresh`) while a cpm
+TUI or `claude` is working on the same profile.
+
+### Streams and exit codes
+
+Results go to stdout. In text mode errors and warnings go to stderr. In JSON
+mode command results and per-profile errors are carried inside the JSON and
+stderr stays empty; usage errors, profile-resolution errors and a failed
+stdout write are still plain stderr text.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | success — including when outdated plugins are found, and when a `--refresh` failed but the cached catalog was used |
+| `1` | a profile failed to load (for `cpm refresh`: failed to refresh), profiles could not be resolved (none found, a path that is not a directory), or stdout could not be written |
+| `2` | usage error in a command: unknown flag (`cpm outdated --bogus`), `--text` with `--json`, a profile dir starting with `-` |
+
+Without a command, a bad argument such as `cpm --bogus` keeps the TUI
+launcher's behavior and exits `1`.

@@ -7,7 +7,8 @@ behavior.
 ## Commands
 
 - `make build` / `make test` / `make lint` (golangci-lint) / `make run`
-- Coverage bar: 80%+ on non-UI packages (`claudecli`, `config`, `model`).
+- Coverage bar: 80%+ on non-UI packages (`claudecli`, `cli`, `config`,
+  `model`).
 
 ## Architecture
 
@@ -20,6 +21,14 @@ behavior.
   matrices; no I/O.
 - `internal/ui` — Bubble Tea app: one `column` of state per profile, loads run
   async per profile, the MCP tab loads lazily on first view.
+- `internal/cli` — non-interactive commands (`outdated`, `refresh`); no Bubble
+  Tea imports. `Run` returns the exit code and loads profiles in parallel
+  under `loadTimeout`; `outdated` reuses `model.MergeLatestVersions` /
+  `IsOutdated` / `ComparePluginIDs` so it agrees with the TUI.
+- `cmd/cpm` — `launcher.run` routes `args[0]` that `cli.IsCommand` accepts to
+  `cli.ParseArgs` (usage error → exit 2) + `resolveProfiles` + `cli.Run`,
+  before the global `-h` scan so `cpm outdated --help` reaches command help;
+  anything else takes the unchanged TUI path (where a bad flag exits 1).
 
 ## Testing conventions
 
@@ -28,11 +37,15 @@ behavior.
   args and records every call. `ResponsesByDir` (consulted before `Responses`)
   lets a test vary one command's answer per profile dir — needed when the same
   args run against different dirs, e.g. the default-profile auth fallback.
+  `Run` is safe for concurrent calls (the CLI loads profiles in parallel);
+  read `Calls` only after the calling goroutines have joined.
 - Marketplace git lookups are stubbed by swapping the package var
   `gitCommitInfo` (`internal/claudecli/gitinfo.go`, `stubGitCommitInfo`
   helper); tests doing so must not use `t.Parallel()`. Any test whose fake
   marketplace list carries a non-empty `installLocation` must stub it, or the
-  load's commit-info pass execs the real `git` against that path.
+  load's commit-info pass execs the real `git` against that path. The
+  external `claudecli_test` package (needed to import `model` without a
+  cycle) reaches it as `StubGitCommitInfo` via `export_test.go`.
 - Real CLI output is captured as fixtures under `internal/claudecli/testdata/`.
 - UI behavior is tested by driving `Model.Update` directly with key/load
   messages and asserting on `View()` output; no TTY needed.
@@ -47,6 +60,12 @@ behavior.
 - `claude plugin list --available --json`: the `source` field is polymorphic —
   a plain string path or an object whose `ref` may be a branch name, not a
   version.
+- `claude plugin list --available --json` leaves *installed* plugins out of
+  `available`, so `LoadPluginsCached` seeds every installed ID into the
+  version map with `""` before the `marketplace.json` fallback — otherwise
+  installed plugins never get a latest version. Catalog entries without a
+  `version` fall back to a version-like `source.ref` (`isVersionRef`), the
+  same rule applied to `available` entries.
 - `claude mcp list` has no `--json` mode and health-checks every server, so it
   is slow — hence the lazy MCP tab and tab-scoped reload. Its output includes
   project/local-scope servers (cwd-dependent) and plugin-provided servers
@@ -71,6 +90,9 @@ behavior.
   skips busy/loading columns, and MCP remove is blocked during a plugin load.
   Generation stamps on load messages only drop superseded results — they
   cannot cancel an in-flight process.
+  This holds within one process only: a CLI `refresh` (or `outdated
+  --refresh`) is not coordinated with a TUI or `claude` on the same profile —
+  documented, not locked.
 - All mutations pin `--scope user`: the CLI auto-detects scope otherwise, so
   acting on a project/local-scope row (cwd-dependent, identical in every
   column) would edit config shared by all profiles. The UI additionally
