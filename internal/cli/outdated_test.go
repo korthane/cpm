@@ -1020,6 +1020,25 @@ func TestOutdatedJSONUnknownHistoryIsEmptyString(t *testing.T) {
 	}
 }
 
+// An incomplete profile has no catalog of its own, so its install's link
+// must come from the profile whose catalog supplied the latest version.
+func TestOutdatedJSONIncompleteProfileGetsLinkFromOtherCatalog(
+	t *testing.T) {
+	t.Parallel()
+	incomplete := widgetLoad(workProfile, "1.2.0", otherSHA, "",
+		claudecli.PluginSource{})
+	incomplete.data.MarketplacesUnknown = true
+	stdout := renderOutdatedJSON(t, []profileLoad{
+		widgetLoad(homeProfile, "1.4.0", latestSHA, "1.4.0", widgetSource()),
+		incomplete,
+	})
+	if !strings.Contains(stdout, `"incomplete":true`) ||
+		!strings.Contains(stdout, `"compare_url":"https://github.com/`+
+			`acme/widgets/compare/9a8b7c6...5d6e7f8"`) {
+		t.Errorf("stdout = %s, want an incomplete profile with a link", stdout)
+	}
+}
+
 // Through Run the install commit comes from the profile's
 // installed_plugins.json and the latest commit from the catalog source.
 func TestOutdatedRunReadsInstalledCommit(t *testing.T) {

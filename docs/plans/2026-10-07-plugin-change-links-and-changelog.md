@@ -406,12 +406,14 @@
 - [x] run tests - must pass before next task
 
 ### Task 9: Verify acceptance criteria
-- [ ] verify all requirements from Overview are implemented
-- [ ] verify edge cases are handled (no SHA, non-GitHub remote, remote source,
+- [x] verify all requirements from Overview are implemented
+- [x] verify edge cases are handled (no SHA, non-GitHub remote, remote source,
       missing/mismatched changelog, incomplete profile)
-- [ ] run full test suite: `make test`
-- [ ] run linter: `make lint`
-- [ ] verify coverage stays at 80%+ for `claudecli`, `cli`, `config`, `model`
+- [x] run full test suite: `make test`
+- [x] run linter: `make lint`
+- [x] verify coverage stays at 80%+ for `claudecli`, `cli`, `config`, `model`
+- [x] ➕ added a test that an incomplete profile's install gets its
+      compare link from the catalog of the profile supplying latest
 
 ### Task 10: [Final] Update documentation
 - [ ] update README.md: links in `outdated` output, `--changelog`, JSON
