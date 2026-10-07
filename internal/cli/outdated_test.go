@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -799,5 +801,254 @@ func TestOutdatedHashLatestDoesNotMaskRelease(t *testing.T) {
 		if stdout != "foo@acme  latest 1.2.0\n  home  1.0.0\n" {
 			t.Errorf("stdout = %q, want foo behind 1.2.0", stdout)
 		}
+	}
+}
+
+const (
+	widgetID      = "widget@example-market"
+	installedSHA  = "1a2b3c4"
+	otherSHA      = "9a8b7c6"
+	latestSHA     = "5d6e7f8"
+	widgetRepo    = "acme/widgets"
+	widgetHistory = "https://github.com/acme/widgets/commits/5d6e7f8/plugins/widget"
+)
+
+func widgetSource() claudecli.PluginSource {
+	return claudecli.PluginSource{
+		RepoURL: widgetRepo, Commit: latestSHA, Path: "plugins/widget",
+	}
+}
+
+// widgetLoad is a loaded profile holding one widget install. A non-empty
+// latest makes the profile's catalog supply it from src.
+func widgetLoad(p config.Profile, version, sha, latest string,
+	src claudecli.PluginSource) profileLoad {
+	id := claudecli.PluginID{Name: "widget", Marketplace: "example-market"}
+	lv := claudecli.LatestVersions{
+		Versions: map[claudecli.PluginID]string{id: latest},
+		Sources:  map[claudecli.PluginID]claudecli.PluginSource{},
+	}
+	if latest != "" {
+		lv.Sources[id] = src
+	}
+	return profileLoad{
+		profile: p,
+		data: claudecli.PluginData{Installed: []claudecli.InstalledPlugin{{
+			ID: id, Version: version, Scope: "user", Enabled: true,
+			CommitSHA: sha,
+		}}},
+		latest: lv,
+	}
+}
+
+func renderOutdatedText(t *testing.T, loads []profileLoad) string {
+	t.Helper()
+	profiles := make([]config.Profile, 0, len(loads))
+	for _, l := range loads {
+		profiles = append(profiles, l.profile)
+	}
+	var out, errOut bytes.Buffer
+	err := writeOutdatedText(&out, &errOut, profileLabels(profiles), loads,
+		findOutdated(loads), false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", errOut.String())
+	}
+	return out.String()
+}
+
+func renderOutdatedJSON(t *testing.T, loads []profileLoad) string {
+	t.Helper()
+	profiles := make([]config.Profile, 0, len(loads))
+	for _, l := range loads {
+		profiles = append(profiles, l.profile)
+	}
+	var out bytes.Buffer
+	err := writeOutdatedJSON(&out, profileLabels(profiles), loads,
+		findOutdated(loads), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+func TestOutdatedTextChangeLinks(t *testing.T) {
+	t.Parallel()
+	loads := []profileLoad{
+		widgetLoad(homeProfile, "1.2.0", installedSHA, "1.4.0", widgetSource()),
+		// No recorded install commit: no compare link for this install.
+		widgetLoad(workProfile, "1.3.1", "", "", claudecli.PluginSource{}),
+	}
+	want := `widget@example-market  latest 1.4.0
+  home  1.2.0
+    changes: https://github.com/acme/widgets/compare/1a2b3c4...5d6e7f8
+  work  1.3.1
+  history: ` + widgetHistory + "\n"
+	if got := renderOutdatedText(t, loads); got != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The link must follow the profile whose catalog supplied the merged latest,
+// so the compare target matches the version shown.
+func TestOutdatedLinksUseSourceOfMergedLatest(t *testing.T) {
+	t.Parallel()
+	older := widgetSource()
+	older.Commit = otherSHA
+	loads := []profileLoad{
+		widgetLoad(homeProfile, "1.2.0", installedSHA, "1.3.0", older),
+		widgetLoad(workProfile, "1.2.0", installedSHA, "1.4.0", widgetSource()),
+	}
+	got := renderOutdatedText(t, loads)
+	if !strings.Contains(got, "compare/1a2b3c4...5d6e7f8\n") ||
+		strings.Contains(got, otherSHA) {
+		t.Errorf("stdout uses the wrong source:\n%s", got)
+	}
+}
+
+func TestOutdatedTextOmitsUnknownLinks(t *testing.T) {
+	t.Parallel()
+	noCommit := widgetSource()
+	noCommit.Commit = ""
+	atRoot := widgetSource()
+	atRoot.Path = ""
+	tests := []struct {
+		name string
+		src  claudecli.PluginSource
+		want string
+	}{
+		{"no latest commit", noCommit, "  home  1.2.0\n"},
+		{"root plugin", atRoot, "  home  1.2.0\n" +
+			"    changes: https://github.com/acme/widgets/compare/" +
+			"1a2b3c4...5d6e7f8\n"},
+		{"not github", claudecli.PluginSource{
+			RepoURL: "https://example.com/acme/widgets.git",
+			Commit:  latestSHA, Path: "plugins/widget",
+		}, "  home  1.2.0\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := renderOutdatedText(t, []profileLoad{
+				widgetLoad(homeProfile, "1.2.0", installedSHA, "1.4.0", tt.src),
+			})
+			want := "widget@example-market  latest 1.4.0\n" + tt.want
+			if got != want {
+				t.Errorf("stdout:\n%s\nwant:\n%s", got, want)
+			}
+		})
+	}
+}
+
+// The source path is catalog data: a control character must not reach the
+// terminal raw.
+func TestOutdatedTextLinksQuoteControlCharacters(t *testing.T) {
+	t.Parallel()
+	src := widgetSource()
+	src.Path = "plugins/wid\x1bget"
+	got := renderOutdatedText(t, []profileLoad{
+		widgetLoad(homeProfile, "1.2.0", installedSHA, "1.4.0", src),
+	})
+	if strings.ContainsFunc(got, func(r rune) bool {
+		return r != '\n' && r < 0x20
+	}) {
+		t.Errorf("stdout carries a raw control character: %q", got)
+	}
+	if !strings.Contains(got, "  history: https://github.com/acme/widgets/"+
+		"commits/5d6e7f8/plugins/wid%1Bget\n") {
+		t.Errorf("stdout = %q, want an escaped history path", got)
+	}
+}
+
+func TestOutdatedJSONChangeLinks(t *testing.T) {
+	t.Parallel()
+	loads := []profileLoad{
+		widgetLoad(homeProfile, "1.2.0", installedSHA, "1.4.0", widgetSource()),
+		widgetLoad(workProfile, "1.3.1", "", "", claudecli.PluginSource{}),
+	}
+	var doc struct {
+		Outdated []map[string]json.RawMessage `json:"outdated"`
+	}
+	stdout := renderOutdatedJSON(t, loads)
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if len(doc.Outdated) != 1 {
+		t.Fatalf("outdated = %s, want one plugin", stdout)
+	}
+	o := doc.Outdated[0]
+	if got := string(o["history_url"]); got != strconv.Quote(widgetHistory) {
+		t.Errorf("history_url = %s, want %q", got, widgetHistory)
+	}
+	var installs []map[string]json.RawMessage
+	if err := json.Unmarshal(o["installs"], &installs); err != nil {
+		t.Fatal(err)
+	}
+	wantCompare := []string{
+		`"https://github.com/acme/widgets/compare/1a2b3c4...5d6e7f8"`, `""`,
+	}
+	if len(installs) != len(wantCompare) {
+		t.Fatalf("installs = %s", o["installs"])
+	}
+	for i, in := range installs {
+		if got := string(in["compare_url"]); got != wantCompare[i] {
+			t.Errorf("install %d compare_url = %s, want %s",
+				i, got, wantCompare[i])
+		}
+	}
+
+	// Existing fields keep their shape.
+	typed := decodeOutdated(t, stdout)
+	if in := typed.Outdated[0].Installs[1]; in.Label != "work" ||
+		in.Path != "/p/work" || in.Version != "1.3.1" || in.Scope != "user" ||
+		!in.Enabled || typed.Outdated[0].Latest != "1.4.0" ||
+		typed.Outdated[0].Plugin != widgetID {
+		t.Errorf("outdated = %+v", typed.Outdated)
+	}
+}
+
+func TestOutdatedJSONUnknownHistoryIsEmptyString(t *testing.T) {
+	t.Parallel()
+	stdout := renderOutdatedJSON(t, []profileLoad{
+		widgetLoad(homeProfile, "1.2.0", "", "1.4.0", claudecli.PluginSource{}),
+	})
+	if !strings.Contains(stdout, `"history_url":""`) ||
+		!strings.Contains(stdout, `"compare_url":""`) {
+		t.Errorf("stdout = %s, want empty link strings", stdout)
+	}
+}
+
+// Through Run the install commit comes from the profile's
+// installed_plugins.json and the latest commit from the catalog source.
+func TestOutdatedRunReadsInstalledCommit(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "plugins"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	records := `{"version":2,"plugins":{"` + widgetID +
+		`":[{"scope":"user","gitCommitSha":"` + installedSHA + `"}]}}`
+	err := os.WriteFile(filepath.Join(dir, "plugins", "installed_plugins.json"),
+		[]byte(records), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := `{"installed":[{"id":"` + widgetID + `","version":"1.2.0",` +
+		`"scope":"user","enabled":true}],"available":[{"pluginId":"` +
+		widgetID + `","version":"1.4.0","source":{"source":"github",` +
+		`"repo":"` + widgetRepo + `","sha":"` + latestSHA +
+		`","path":"plugins/widget"}}]}`
+	r := newOutdatedRunner(map[string][]byte{dir: []byte(list)})
+	profile := config.Profile{Path: dir, Label: "home"}
+	_, stdout, stderr := runCmd(t, r, []config.Profile{profile},
+		Options{Command: "outdated", Format: FormatText})
+	want := `widget@example-market  latest 1.4.0
+  home  1.2.0
+    changes: https://github.com/acme/widgets/compare/1a2b3c4...5d6e7f8
+  history: ` + widgetHistory + "\n"
+	if stdout != want || stderr != "" {
+		t.Errorf("stdout:\n%s\nwant:\n%s\nstderr: %q", stdout, want, stderr)
 	}
 }

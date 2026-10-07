@@ -352,17 +352,17 @@
 - Modify: `internal/cli/outdated.go`
 - Modify: `internal/cli/outdated_test.go`
 
-- [ ] write tests (text): `changes:` line under an install with both commits;
+- [x] write tests (text): `changes:` line under an install with both commits;
       no line when either is missing; `history:` line for a subdirectory
       plugin; control characters quoted
-- [ ] write tests (JSON): `compare_url` per install and `history_url` per
+- [x] write tests (JSON): `compare_url` per install and `history_url` per
       plugin, `""` when unknown; existing fields unchanged
-- [ ] implement links in both renderers; tests build `[]profileLoad` with
+- [x] implement links in both renderers; tests build `[]profileLoad` with
       `latest.Sources` and `InstalledPlugin.CommitSHA` set and call
       `findOutdated` and the renderers directly (FakeRunner cannot supply
       them); one smoke test through `Run` uses a temp profile dir holding
       `plugins/installed_plugins.json`
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
 
 ### Task 7: `outdated --changelog`
 

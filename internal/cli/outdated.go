@@ -51,12 +51,18 @@ func (l profileLoad) incomplete() bool {
 type outdatedInstall struct {
 	profile config.Profile
 	plugin  claudecli.InstalledPlugin
+	// compare links the install's commit to the latest one; "" if unknown.
+	compare string
 }
 
 type outdatedPlugin struct {
 	id       claudecli.PluginID
 	latest   string
 	installs []outdatedInstall
+	// source is where latest lives, from the profile that supplied it.
+	source claudecli.PluginSource
+	// history lists the latest commits touching the plugin; "" if unknown.
+	history string
 }
 
 func runOutdated(ctx context.Context, r claudecli.Runner,
@@ -115,10 +121,13 @@ func findOutdated(loads []profileLoad) []outdatedPlugin {
 			op, ok := byID[p.ID]
 			if !ok {
 				op = &outdatedPlugin{id: p.ID, latest: latest[p.ID]}
+				op.source, _ = model.LatestSource(perProfile, p.ID, op.latest)
+				_, op.history = model.ChangeLinks(op.source, "")
 				byID[p.ID] = op
 			}
-			op.installs = append(op.installs,
-				outdatedInstall{profile: l.profile, plugin: p})
+			compare, _ := model.ChangeLinks(op.source, p.CommitSHA)
+			op.installs = append(op.installs, outdatedInstall{
+				profile: l.profile, plugin: p, compare: compare})
 		}
 	}
 
@@ -192,6 +201,13 @@ func writeOutdatedText(stdout, stderr io.Writer, labels map[string]string,
 				_, _ = fmt.Fprintf(&buf, "  %-*s  %s\n",
 					labelWidth, label, version)
 			}
+			if in.compare != "" {
+				_, _ = fmt.Fprintf(&buf, "    changes: %s\n",
+					quoteControl(in.compare))
+			}
+		}
+		if op.history != "" {
+			_, _ = fmt.Fprintf(&buf, "  history: %s\n", quoteControl(op.history))
 		}
 	}
 	_, err := stdout.Write(buf.Bytes())
@@ -223,17 +239,19 @@ type profileJSON struct {
 }
 
 type outdatedPluginJSON struct {
-	Plugin   string        `json:"plugin"`
-	Latest   string        `json:"latest"`
-	Installs []installJSON `json:"installs"`
+	Plugin     string        `json:"plugin"`
+	Latest     string        `json:"latest"`
+	Installs   []installJSON `json:"installs"`
+	HistoryURL string        `json:"history_url"`
 }
 
 type installJSON struct {
-	Label   string `json:"label"`
-	Path    string `json:"path"`
-	Version string `json:"version"`
-	Scope   string `json:"scope"`
-	Enabled bool   `json:"enabled"`
+	Label      string `json:"label"`
+	Path       string `json:"path"`
+	Version    string `json:"version"`
+	Scope      string `json:"scope"`
+	Enabled    bool   `json:"enabled"`
+	CompareURL string `json:"compare_url"`
 }
 
 func writeOutdatedJSON(stdout io.Writer, labels map[string]string,
@@ -257,17 +275,19 @@ func writeOutdatedJSON(stdout io.Writer, labels map[string]string,
 	}
 	for _, op := range outdated {
 		o := outdatedPluginJSON{
-			Plugin:   op.id.String(),
-			Latest:   op.latest,
-			Installs: make([]installJSON, 0, len(op.installs)),
+			Plugin:     op.id.String(),
+			Latest:     op.latest,
+			Installs:   make([]installJSON, 0, len(op.installs)),
+			HistoryURL: op.history,
 		}
 		for _, in := range op.installs {
 			o.Installs = append(o.Installs, installJSON{
-				Label:   labels[in.profile.Path],
-				Path:    in.profile.Path,
-				Version: in.plugin.Version,
-				Scope:   in.plugin.Scope,
-				Enabled: in.plugin.Enabled,
+				Label:      labels[in.profile.Path],
+				Path:       in.profile.Path,
+				Version:    in.plugin.Version,
+				Scope:      in.plugin.Scope,
+				Enabled:    in.plugin.Enabled,
+				CompareURL: in.compare,
 			})
 		}
 		doc.Outdated = append(doc.Outdated, o)
