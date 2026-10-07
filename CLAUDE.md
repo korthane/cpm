@@ -161,7 +161,9 @@ behavior.
 - `ChangelogExcerpt` headings: ATX `#`–`###` (≤3 spaces indent, then a
   space) whose first word is a version (*plain*) or a name then a version
   (*scoped*; the name is cut at `@`, and `version`/`release`/`v` count as
-  plain); `[1.2.0]` / `[1.2.0](link)` are unwrapped. *Every* version
+  plain); `[1.2.0]` / `[1.2.0](link)` are unwrapped. `Unreleased` in the
+  version slot is a boundary only: never collected, never makes the file
+  scoped. *Every* version
   heading ends the section above it, but only this plugin's are collected:
   scoped ones (name case-insensitive) if the file has any, else plain ones —
   so an interleaved multi-plugin file never leaks another plugin's body.

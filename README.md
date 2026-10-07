@@ -393,7 +393,8 @@ is read even if the links come from another profile's remote source. Version hea
 are recognized; in a changelog shared by several plugins, headings prefixed
 with the plugin name (`## foo v0.35.1`, or `## foo@acme v0.35.1`) select
 that plugin's sections only. Sections are shown newest first whatever the
-file's order, so an oldest-first changelog works too. Headings inside code
+file's order, so an oldest-first changelog works too; an `## Unreleased`
+heading ends the section above it and is never shown. Headings inside code
 blocks are ignored and long excerpts are cut at 200 lines.
 
 Known limitation: a plugin in a subdirectory without its own `CHANGELOG.md`

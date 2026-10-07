@@ -108,8 +108,10 @@
     pinned SHAs.
 - **Merging**: the source comes from a profile that supplied the winning
   latest version (`model.LatestSource`), so link and version agree. Ties
-  (equal under the version compare) prefer a non-stale profile, then profile
-  order. The matrix/group builders keep their signatures: the UI calls
+  (equal under the version compare) prefer a source that can build links
+  (`ChangeLinks` rules), then a non-stale profile, then profile order;
+  `--changelog` uses `model.ChangelogSource`, where a source with a clone
+  dir wins the tie. The matrix/group builders keep their signatures: the UI calls
   `LatestSource` for the selected row only.
 - **Links** are built in `model` (pure): repo strings are normalized to a
   GitHub web URL only for `github.com` (https, `git@github.com:`, `ssh://`,
@@ -164,10 +166,9 @@
     heading scoped to this plugin (name compared case-insensitively), only
     those, otherwise only plain ones (so an interleaved multi-plugin
     changelog never leaks another plugin's section body into the excerpt);
-  - the excerpt starts at the collected heading equal to `latest` (version
-    compare, not string equality) and runs until the first collected heading
-    `<= installed` or EOF; collected headings above `latest` met later are
-    skipped; `## Unreleased`-style headings above it are skipped;
+  - every collected section with version in (installed, latest] is taken
+    regardless of file order and sorted newest first (stable); an
+    `Unreleased` heading only ends the section above it;
   - no heading for `latest` (or empty `latest`) → `ok=false` (the changelog
     tracks something else); trailing blank lines trimmed; output capped at
     200 lines with a `… (truncated)` marker.
@@ -206,8 +207,10 @@
   `chromeLines`), showing exactly the URL `o` will open: the compare URL, or
   the history URL when there is no compare URL.
 - The opener (`openURL`, injectable) runs as a `tea.Cmd`:
-  `exec.CommandContext` with a short timeout, no shell, `open` on darwin and
-  `xdg-open` elsewhere; Stdin/Stdout/Stderr left unset so the opener cannot
+  `Start` with no shell, `open` on darwin and `xdg-open` elsewhere; it
+  waits up to 5s for an exit status, and an opener still running then
+  counts as success and is reaped in the background (`xdg-open` may block
+  until the browser exits); Stdin/Stdout/Stderr left unset so the opener cannot
   write over the Bubble Tea screen. It refuses any URL not starting with
   `https://github.com/` (on macOS `open` would launch files and apps).
   Failure sets an error status. The help line adds `o: open changes` only

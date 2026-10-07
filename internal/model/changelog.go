@@ -16,6 +16,8 @@ var headingVersion = regexp.MustCompile(
 
 // versionHeading is a recognized changelog section heading: plain
 // (`## 1.2.0`) when scope is empty, else scoped (`## <scope> 1.2.0`).
+// An empty version is an Unreleased heading: it ends the section above it
+// but is never collected.
 type versionHeading struct {
 	line    int
 	scope   string
@@ -37,7 +39,7 @@ func ChangelogExcerpt(text, plugin, installed, latest string) (string, bool) {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	headings := findVersionHeadings(lines)
 	scoped := slices.ContainsFunc(headings, func(h versionHeading) bool {
-		return strings.EqualFold(h.scope, plugin)
+		return h.version != "" && strings.EqualFold(h.scope, plugin)
 	})
 	owns := func(h versionHeading) bool {
 		if scoped {
@@ -53,7 +55,8 @@ func ChangelogExcerpt(text, plugin, installed, latest string) (string, bool) {
 	var sections []section
 	found := false
 	for i, h := range headings {
-		if !owns(h) || compareVersions(h.version, latest) > 0 {
+		if h.version == "" || !owns(h) ||
+			compareVersions(h.version, latest) > 0 {
 			continue
 		}
 		if installed != "" && compareVersions(h.version, installed) <= 0 {
@@ -152,7 +155,8 @@ func isFenceClose(line, fence string) bool {
 // parseVersionHeading recognizes `#`–`###` + space, then a version or a
 // word followed by a version; `[1.2.0]` and `[1.2.0](link)` are unwrapped.
 // The word is the scope, cut at `@` so `widget@market` scopes to widget;
-// "version", "release" and "v" are not scopes.
+// "version", "release" and "v" are not scopes. `Unreleased` in place of
+// the version gives an empty version.
 func parseVersionHeading(line string) (versionHeading, bool) {
 	hashes := len(line) - len(strings.TrimLeft(line, "#"))
 	if hashes < 1 || hashes > 3 || len(line) == hashes {
@@ -165,16 +169,26 @@ func parseVersionHeading(line string) (versionHeading, bool) {
 	if len(words) == 0 {
 		return versionHeading{}, false
 	}
-	if v := unwrapVersion(words[0]); headingVersion.MatchString(v) {
+	if v, ok := headingVersionWord(words[0]); ok {
 		return versionHeading{version: v}, true
 	}
 	if len(words) > 1 {
-		if v := unwrapVersion(words[1]); headingVersion.MatchString(v) {
+		if v, ok := headingVersionWord(words[1]); ok {
 			return versionHeading{scope: headingScope(words[0]), version: v},
 				true
 		}
 	}
 	return versionHeading{}, false
+}
+
+// headingVersionWord returns the version a heading word names, "" for
+// Unreleased.
+func headingVersionWord(word string) (string, bool) {
+	v := unwrapVersion(word)
+	if strings.EqualFold(v, "unreleased") {
+		return "", true
+	}
+	return v, headingVersion.MatchString(v)
 }
 
 func headingScope(word string) string {

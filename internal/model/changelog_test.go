@@ -402,3 +402,44 @@ func TestChangelogExcerptEmptyInstalledRunsToEOF(t *testing.T) {
 		t.Errorf("got (%q, %v), want (%q, true)", got, ok, want)
 	}
 }
+
+func TestChangelogExcerptUnreleasedEndsSection(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, text, want string
+	}{
+		{
+			name: "oldest first with trailing unreleased",
+			text: lines("## 1.0.0", "- old", "## 2.0.0", "- released",
+				"## Unreleased", "- pending"),
+			want: lines("## 2.0.0", "- released"),
+		},
+		{
+			name: "keep a changelog link form",
+			text: lines("## [1.0.0]", "- old", "## [2.0.0]", "- released",
+				"## [Unreleased](https://example.com/compare)", "- pending"),
+			want: lines("## [2.0.0]", "- released"),
+		},
+		{
+			name: "scoped unreleased",
+			text: lines("## widget 1.0.0", "- old", "## widget 2.0.0",
+				"- released", "## widget Unreleased", "- pending"),
+			want: lines("## widget 2.0.0", "- released"),
+		},
+		{
+			name: "scoped unreleased alone does not switch to scoped mode",
+			text: lines("## widget unreleased", "- pending", "## 2.0.0",
+				"- released", "## 1.0.0"),
+			want: lines("## 2.0.0", "- released"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := ChangelogExcerpt(tt.text, "widget", "1.0.0", "2.0.0")
+			if !ok || got != tt.want {
+				t.Errorf("got (%q, %v), want (%q, true)", got, ok, tt.want)
+			}
+		})
+	}
+}
