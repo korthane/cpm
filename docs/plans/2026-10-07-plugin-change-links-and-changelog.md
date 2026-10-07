@@ -150,19 +150,27 @@
   pins one, else a ref (best-effort: a branch may have moved since load).
 - `model.ChangelogExcerpt(text, plugin, installed, latest string)
   (excerpt string, ok bool)`:
-  - a *version heading* is an ATX heading (`#`–`###`) whose first word is a
-    version (`v?` + dotted numeric, optional pre-release) — *plain* — or whose
-    first word is the plugin name followed by a version — *scoped*; a version
+  - a *version heading* is an ATX heading (up to 3 spaces indent, then
+    1–3 `#` followed by a space) whose first word is a version (`v?` +
+    dotted numeric, optional pre-release) — *plain* — or whose first word is
+    any name followed by a version — *scoped* to that name; a version
     wrapped as `[1.2.0]` or as a link `[1.2.0](https://…)` (keep-a-changelog,
     release-please) is unwrapped before the check;
-  - if the file has any heading scoped to this plugin, only scoped headings
-    count, otherwise only plain ones (a multi-plugin root changelog never
-    leaks another plugin's sections into a plain match);
-  - the excerpt starts at the heading equal to `latest` (version compare, not
-    string equality) and runs until the first version heading `<= installed`
-    or EOF; `## Unreleased`-style headings above it are skipped;
-  - no heading for `latest` → `ok=false` (the changelog tracks something
-    else); output capped at 200 lines with a `… (truncated)` marker.
+  - lines inside ``` or ~~~ fenced code blocks are never headings: a fenced
+    `## 2.0.0` cannot match latest and a fenced `# 1.0.0` cannot end an
+    excerpt (fenced lines stay content of the section they are in);
+  - *every* version heading — plain or scoped to any name — ends the section
+    above it; only this plugin's sections are collected: if the file has any
+    heading scoped to this plugin (name compared case-insensitively), only
+    those, otherwise only plain ones (so an interleaved multi-plugin
+    changelog never leaks another plugin's section body into the excerpt);
+  - the excerpt starts at the collected heading equal to `latest` (version
+    compare, not string equality) and runs until the first collected heading
+    `<= installed` or EOF; collected headings above `latest` met later are
+    skipped; `## Unreleased`-style headings above it are skipped;
+  - no heading for `latest` (or empty `latest`) → `ok=false` (the changelog
+    tracks something else); trailing blank lines trimmed; output capped at
+    200 lines with a `… (truncated)` marker.
 - `claudecli.ReadChangelog(src PluginSource) (text, file string, err error)`:
   tries `<Path>/CHANGELOG.md`, then the clone-root `CHANGELOG.md`, via
   `OpenRoot(CloneDir)` + `readCloneFile`; `file` is the clone-relative path
@@ -239,17 +247,26 @@
 - Create: `internal/model/changelog.go`
 - Create: `internal/model/changelog_test.go`
 
-- [ ] write tests for plain headings (`## v1.2.0 - date`, `## 1.2.0`,
+- [x] write tests for plain headings (`## v1.2.0 - date`, `## 1.2.0`,
       `### [1.2.0]`, `## [1.2.0](https://example.com/compare/a...b)
       (2026-01-01)`): range between installed and latest, exclusive/inclusive
       bounds, `## Unreleased` above latest skipped, sub-headings kept as content
-- [ ] write tests for scoped headings in a multi-plugin changelog (only this
+- [x] write tests for scoped headings in a multi-plugin changelog (only this
       plugin's sections; another plugin's sections never included)
-- [ ] write tests for edge cases: latest heading missing (`ok=false`),
+- [x] write tests for edge cases: latest heading missing (`ok=false`),
       installed heading missing (runs to the first lower version or EOF),
       `v` prefix mismatch, CRLF line endings, 200-line cap marker
-- [ ] implement `ChangelogExcerpt` reusing the existing version compare
-- [ ] run tests - must pass before next task
+- [x] ➕ write tests for section boundaries: interleaved scoped changelog
+      (`## widget 2.0.0` / `## helper 9.0.0` / `## widget 1.0.0` yields only
+      widget's sections); mixed plain/scoped files in both modes
+- [x] ➕ write tests for fenced code blocks (``` and ~~~): a fenced heading
+      neither matches latest nor ends an excerpt; strict ATX syntax
+      (`##2.0.0`, `#### 1.0.0` and 4-space indent are not headings)
+- [x] ➕ review follow-up: a ``` opener whose info string holds a backtick
+      is an inline code span, not a fence (tilde info strings unchanged);
+      test a newer-than-latest heading appearing after the latest heading
+- [x] implement `ChangelogExcerpt` reusing the existing version compare
+- [x] run tests - must pass before next task
 
 ### Task 3: Installed commit SHA (claudecli)
 
