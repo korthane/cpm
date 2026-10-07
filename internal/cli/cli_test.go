@@ -55,6 +55,14 @@ func TestParseArgs(t *testing.T) {
 			},
 		},
 		{
+			name: "changelog for outdated",
+			args: []string{"outdated", "--changelog", "/a"},
+			want: Options{
+				Command: "outdated", Format: FormatText, Changelog: true,
+				Dirs: []string{"/a"},
+			},
+		},
+		{
 			name: "short help",
 			args: []string{"outdated", "-h"},
 			want: Options{Command: "outdated", Format: FormatText, Help: true},
@@ -74,6 +82,7 @@ func TestParseArgs(t *testing.T) {
 			}
 			if got.Command != tt.want.Command || got.Format != tt.want.Format ||
 				got.Refresh != tt.want.Refresh || got.Help != tt.want.Help ||
+				got.Changelog != tt.want.Changelog ||
 				!slices.Equal(got.Dirs, tt.want.Dirs) {
 				t.Errorf("ParseArgs(%q) = %+v, want %+v", tt.args, got, tt.want)
 			}
@@ -98,6 +107,8 @@ func TestParseArgsUsageErrors(t *testing.T) {
 			`unknown flag "-dir"`},
 		{"refresh flag only for outdated", []string{"refresh", "--refresh"},
 			`unknown flag "--refresh"`},
+		{"changelog flag only for outdated", []string{"refresh", "--changelog"},
+			`unknown flag "--changelog"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,7 +163,9 @@ func TestRunOutdatedUsageMentionsRefreshFlag(t *testing.T) {
 	opts := Options{Command: "outdated", Help: true}
 	Run(context.Background(), &claudecli.FakeRunner{}, nil, opts,
 		&stdout, &bytes.Buffer{})
-	for _, want := range []string{"--refresh", "--json", "--text", "./outdated"} {
+	for _, want := range []string{
+		"--refresh", "--changelog", "--json", "--text", "./outdated",
+	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("outdated usage lacks %q:\n%s", want, stdout.String())
 		}

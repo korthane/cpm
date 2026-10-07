@@ -184,10 +184,10 @@
       changes: https://github.com/acme/widgets/compare/1a2b3c4...5d6e7f8
     work     1.3.1
       changes: https://github.com/acme/widgets/compare/9a8b7c6...5d6e7f8
-    history: https://github.com/acme/widgets/commits/5d6e7f8/plugins/widget
-    changelog (plugins/widget/CHANGELOG.md):
-      ## v1.4.0 - 2026-01-01
-      - …
+  history: https://github.com/acme/widgets/commits/5d6e7f8/plugins/widget
+  changelog (plugins/widget/CHANGELOG.md):
+    ## v1.4.0 - 2026-01-01
+    - …
   ```
   With `--changelog` and nothing to show, one of: `changelog: no entry for
   1.4.0`, `changelog: no CHANGELOG.md`, `changelog: no local changelog`
@@ -369,18 +369,19 @@
 **Files:**
 - Modify: `internal/cli/cli.go`, `cli_test.go`
 - Modify: `internal/cli/outdated.go`, `outdated_test.go`
+- Modify: `cmd/cpm/main_test.go` (exit 2 for `refresh --changelog`)
 
-- [ ] write tests for parsing: `--changelog` accepted by `outdated`,
+- [x] write tests for parsing: `--changelog` accepted by `outdated`,
       rejected by `refresh` (usage error, exit 2); help text lists it
-- [ ] write tests for text output: excerpt indented under the plugin with its
+- [x] write tests for text output: excerpt indented under the plugin with its
       file; lower bound is the oldest installed version; `no entry for X` /
       `no CHANGELOG.md` lines; remote source → `no local changelog`
-- [ ] write tests for JSON: `changelog` object or `null` with the flag, key
+- [x] write tests for JSON: `changelog` object or `null` with the flag, key
       absent without it
-- [ ] implement the flag and rendering; tests build `profileLoad` values
+- [x] implement the flag and rendering; tests build `profileLoad` values
       whose `Sources` point `CloneDir` at a temp dir with a `CHANGELOG.md`
       (no git needed, since `CloneDir` is kept without a commit)
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
 
 ### Task 8: TUI change link and `o` key
 

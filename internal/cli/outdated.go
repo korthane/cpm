@@ -63,12 +63,61 @@ type outdatedPlugin struct {
 	source claudecli.PluginSource
 	// history lists the latest commits touching the plugin; "" if unknown.
 	history string
+	// changelog is nil unless --changelog asked for it.
+	changelog *pluginChangelog
+}
+
+// pluginChangelog is the changelog excerpt of one outdated plugin, or why
+// there is none: text is empty exactly when missing is set.
+type pluginChangelog struct {
+	file    string
+	since   string
+	text    string
+	missing string
+}
+
+// attachChangelogs reads each plugin's changelog from the clone its latest
+// version lives in. The excerpt starts after the oldest install, so every
+// install's missing entries are covered.
+func attachChangelogs(outdated []outdatedPlugin) {
+	for i := range outdated {
+		op := &outdated[i]
+		since := op.installs[0].plugin.Version
+		for _, in := range op.installs[1:] {
+			if model.IsOutdated(in.plugin.Version, since) {
+				since = in.plugin.Version
+			}
+		}
+		op.changelog = readPluginChangelog(op.source, op.id.Name, since,
+			op.latest)
+	}
+}
+
+func readPluginChangelog(src claudecli.PluginSource,
+	plugin, since, latest string) *pluginChangelog {
+	if src.CloneDir == "" {
+		return &pluginChangelog{since: since, missing: "no local changelog"}
+	}
+	// Any read failure (absent, unreadable, refused) leaves nothing to show.
+	text, file, err := claudecli.ReadChangelog(src)
+	if err != nil {
+		return &pluginChangelog{since: since, missing: "no CHANGELOG.md"}
+	}
+	excerpt, ok := model.ChangelogExcerpt(text, plugin, since, latest)
+	if !ok {
+		return &pluginChangelog{file: file, since: since,
+			missing: "no entry for " + quoteControl(latest)}
+	}
+	return &pluginChangelog{file: file, since: since, text: excerpt}
 }
 
 func runOutdated(ctx context.Context, r claudecli.Runner,
 	profiles []config.Profile, opts Options, stdout, stderr io.Writer) int {
 	loads := loadProfiles(ctx, r, profiles, opts.Refresh)
 	outdated := findOutdated(loads)
+	if opts.Changelog {
+		attachChangelogs(outdated)
+	}
 
 	// An unchecked profile is a failure too: nothing proves it is current.
 	failed := slices.ContainsFunc(loads,
@@ -209,9 +258,31 @@ func writeOutdatedText(stdout, stderr io.Writer, labels map[string]string,
 		if op.history != "" {
 			_, _ = fmt.Fprintf(&buf, "  history: %s\n", quoteControl(op.history))
 		}
+		writeChangelogText(&buf, op.changelog)
 	}
 	_, err := stdout.Write(buf.Bytes())
 	return err
+}
+
+func writeChangelogText(buf *bytes.Buffer, c *pluginChangelog) {
+	switch {
+	case c == nil:
+		return
+	case c.missing != "":
+		_, _ = fmt.Fprintf(buf, "  changelog: %s\n", c.missing)
+		return
+	}
+	_, _ = fmt.Fprintf(buf, "  changelog (%s):\n", quoteControl(c.file))
+	for line := range strings.Lines(c.text) {
+		line = strings.TrimSuffix(line, "\n")
+		if line == "" {
+			buf.WriteByte('\n')
+			continue
+		}
+		// Expand tabs first: quoting would mangle a plain indented line.
+		line = strings.ReplaceAll(line, "\t", "    ")
+		_, _ = fmt.Fprintf(buf, "    %s\n", quoteControl(line))
+	}
 }
 
 func installMarkers(p claudecli.InstalledPlugin) string {
@@ -243,6 +314,37 @@ type outdatedPluginJSON struct {
 	Latest     string        `json:"latest"`
 	Installs   []installJSON `json:"installs"`
 	HistoryURL string        `json:"history_url"`
+	Changelog  changelogJSON `json:"changelog,omitzero"`
+}
+
+// changelogJSON renders null when --changelog found nothing, and is omitted
+// entirely without the flag.
+type changelogJSON struct {
+	requested bool
+	found     *changelogFoundJSON
+}
+
+type changelogFoundJSON struct {
+	File  string `json:"file"`
+	Since string `json:"since"`
+	Text  string `json:"text"`
+}
+
+func (c changelogJSON) IsZero() bool { return !c.requested }
+
+func (c changelogJSON) MarshalJSON() ([]byte, error) {
+	return json.Marshal(c.found)
+}
+
+func newChangelogJSON(c *pluginChangelog) changelogJSON {
+	switch {
+	case c == nil:
+		return changelogJSON{}
+	case c.missing != "":
+		return changelogJSON{requested: true}
+	}
+	return changelogJSON{requested: true, found: &changelogFoundJSON{
+		File: c.file, Since: c.since, Text: c.text}}
 }
 
 type installJSON struct {
@@ -279,6 +381,7 @@ func writeOutdatedJSON(stdout io.Writer, labels map[string]string,
 			Latest:     op.latest,
 			Installs:   make([]installJSON, 0, len(op.installs)),
 			HistoryURL: op.history,
+			Changelog:  newChangelogJSON(op.changelog),
 		}
 		for _, in := range op.installs {
 			o.Installs = append(o.Installs, installJSON{

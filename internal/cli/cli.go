@@ -34,6 +34,9 @@ type Options struct {
 	// Refresh runs `plugin marketplace update` before reading catalogs
 	// (outdated only).
 	Refresh bool
+	// Changelog adds each outdated plugin's changelog excerpt (outdated
+	// only).
+	Changelog bool
 	// Help asks for the command's usage instead of running it.
 	Help bool
 	// Dirs are the profile dirs given on the command line, in order.
@@ -54,7 +57,9 @@ type command struct {
 	usage string
 	// refreshFlag reports whether the command accepts --refresh.
 	refreshFlag bool
-	run         func(ctx context.Context, r claudecli.Runner,
+	// changelogFlag reports whether the command accepts --changelog.
+	changelogFlag bool
+	run           func(ctx context.Context, r claudecli.Runner,
 		profiles []config.Profile, opts Options, stdout, stderr io.Writer) int
 }
 
@@ -67,17 +72,21 @@ command as ./outdated.`
 
 var commands = map[string]command{
 	"outdated": {
-		usage: `usage: cpm outdated [--refresh] [--text|--json] [<profile-dir> ...]
+		usage: `usage: cpm outdated [--refresh] [--changelog] [--text|--json]
+                    [<profile-dir> ...]
 
 List installed plugins with a newer version in a marketplace catalog, and
 the profiles that have them installed.
 
-  --refresh  run 'claude plugin marketplace update' first
-  --text     human-readable output (default)
-  --json     machine-readable output
+  --refresh    run 'claude plugin marketplace update' first
+  --changelog  show each plugin's CHANGELOG.md entries since the oldest
+               installed version, read from the local marketplace clone
+  --text       human-readable output (default)
+  --json       machine-readable output
 ` + ProfilesNote,
-		refreshFlag: true,
-		run:         runOutdated,
+		refreshFlag:   true,
+		changelogFlag: true,
+		run:           runOutdated,
 	},
 	"refresh": {
 		usage: `usage: cpm refresh [--text|--json] [<profile-dir> ...]
@@ -127,6 +136,8 @@ func ParseArgs(args []string) (Options, error) {
 			json = true
 		case arg == "--refresh" && cmd.refreshFlag:
 			opts.Refresh = true
+		case arg == "--changelog" && cmd.changelogFlag:
+			opts.Changelog = true
 		case strings.HasPrefix(arg, "-"):
 			// Dashed dirs are rejected too: they would read as a flag typo.
 			return Options{}, fmt.Errorf("%s: unknown flag %q", name, arg)

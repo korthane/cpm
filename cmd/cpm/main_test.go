@@ -383,6 +383,8 @@ func TestRunCommandErrorsBeforeRun(t *testing.T) {
 			"cpm: outdated: unknown flag \"--bogus\"\n"},
 		{"unknown flag json", []string{"outdated", "--json", "--bogus"}, 2,
 			"cpm: outdated: unknown flag \"--bogus\"\n"},
+		{"changelog only for outdated", []string{"refresh", "--changelog"}, 2,
+			"cpm: refresh: unknown flag \"--changelog\"\n"},
 		{"missing dir", []string{"outdated", "/nonexistent"}, 1,
 			"cpm: profile /nonexistent is not a directory\n"},
 		{"missing dir json", []string{"outdated", "--json", "/nonexistent"}, 1,

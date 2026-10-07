@@ -1052,3 +1052,244 @@ func TestOutdatedRunReadsInstalledCommit(t *testing.T) {
 		t.Errorf("stdout:\n%s\nwant:\n%s\nstderr: %q", stdout, want, stderr)
 	}
 }
+
+const widgetChangelog = `# Changelog
+
+## v1.4.0 - 2026-01-01
+- Add gadgets
+
+## 1.3.1
+- Fix a crash
+
+## 1.3.0
+- Speed up
+
+## 1.2.0
+- Initial release
+`
+
+// changelogSource is widgetSource backed by a clone dir whose plugin
+// directory holds changelog; an empty changelog writes no file.
+func changelogSource(t *testing.T, changelog string) claudecli.PluginSource {
+	t.Helper()
+	src := widgetSource()
+	src.CloneDir = t.TempDir()
+	if changelog == "" {
+		return src
+	}
+	dir := filepath.Join(src.CloneDir, "plugins", "widget")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"),
+		[]byte(changelog), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return src
+}
+
+func outdatedWithChangelogs(loads []profileLoad) []outdatedPlugin {
+	outdated := findOutdated(loads)
+	attachChangelogs(outdated)
+	return outdated
+}
+
+func renderChangelogText(t *testing.T, loads []profileLoad) string {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	err := writeOutdatedText(&out, &errOut, profileLabels(loadProfilesOf(loads)),
+		loads, outdatedWithChangelogs(loads), false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", errOut.String())
+	}
+	return out.String()
+}
+
+func loadProfilesOf(loads []profileLoad) []config.Profile {
+	profiles := make([]config.Profile, 0, len(loads))
+	for _, l := range loads {
+		profiles = append(profiles, l.profile)
+	}
+	return profiles
+}
+
+// The excerpt starts after the oldest install, so every install sees the
+// entries it is missing.
+func TestOutdatedTextChangelog(t *testing.T) {
+	t.Parallel()
+	src := changelogSource(t, widgetChangelog)
+	loads := []profileLoad{
+		widgetLoad(homeProfile, "1.3.1", "", "1.4.0", src),
+		widgetLoad(workProfile, "1.2.0", "", "", claudecli.PluginSource{}),
+	}
+	want := `widget@example-market  latest 1.4.0
+  home  1.3.1
+  work  1.2.0
+  history: ` + widgetHistory + `
+  changelog (plugins/widget/CHANGELOG.md):
+    ## v1.4.0 - 2026-01-01
+    - Add gadgets
+
+    ## 1.3.1
+    - Fix a crash
+
+    ## 1.3.0
+    - Speed up
+`
+	if got := renderChangelogText(t, loads); got != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestOutdatedTextChangelogNothingToShow(t *testing.T) {
+	t.Parallel()
+	remote := widgetSource()
+	tests := []struct {
+		name string
+		src  claudecli.PluginSource
+		want string
+	}{
+		{"no entry for latest",
+			changelogSource(t, "## 1.3.0\n- Speed up\n"),
+			"  changelog: no entry for 1.4.0\n"},
+		{"no changelog file", changelogSource(t, ""),
+			"  changelog: no CHANGELOG.md\n"},
+		{"remote source", remote, "  changelog: no local changelog\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := renderChangelogText(t, []profileLoad{
+				widgetLoad(homeProfile, "1.2.0", "", "1.4.0", tt.src),
+			})
+			want := "widget@example-market  latest 1.4.0\n  home  1.2.0\n" +
+				"  history: " + widgetHistory + "\n" + tt.want
+			if got != want {
+				t.Errorf("stdout:\n%s\nwant:\n%s", got, want)
+			}
+		})
+	}
+}
+
+// Changelog text is third-party: control characters must not reach the
+// terminal raw, while a tab is expanded rather than quoting the line.
+func TestOutdatedTextChangelogQuotesControlCharacters(t *testing.T) {
+	t.Parallel()
+	src := changelogSource(t,
+		"## 1.4.0\n- Add \x1b[31mred\x1b[0m\n-\tTabbed\n## 1.2.0\n")
+	got := renderChangelogText(t, []profileLoad{
+		widgetLoad(homeProfile, "1.2.0", "", "1.4.0", src),
+	})
+	if strings.ContainsFunc(got, func(r rune) bool {
+		return r != '\n' && r < 0x20
+	}) {
+		t.Errorf("stdout carries a raw control character: %q", got)
+	}
+	for _, want := range []string{
+		`    "- Add \x1b[31mred\x1b[0m"` + "\n",
+		"    -    Tabbed\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdout = %q, want line %q", got, want)
+		}
+	}
+}
+
+func renderChangelogJSON(t *testing.T, loads []profileLoad,
+	outdated []outdatedPlugin) []map[string]json.RawMessage {
+	t.Helper()
+	var out bytes.Buffer
+	err := writeOutdatedJSON(&out, profileLabels(loadProfilesOf(loads)), loads,
+		outdated, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Outdated []map[string]json.RawMessage `json:"outdated"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, out.String())
+	}
+	if len(doc.Outdated) != 1 {
+		t.Fatalf("outdated = %s, want one plugin", out.String())
+	}
+	return doc.Outdated
+}
+
+func TestOutdatedJSONChangelog(t *testing.T) {
+	t.Parallel()
+	loads := []profileLoad{
+		widgetLoad(homeProfile, "1.3.1", "", "1.4.0",
+			changelogSource(t, widgetChangelog)),
+		widgetLoad(workProfile, "1.2.0", "", "", claudecli.PluginSource{}),
+	}
+	o := renderChangelogJSON(t, loads, outdatedWithChangelogs(loads))[0]
+	var got struct {
+		File  string `json:"file"`
+		Since string `json:"since"`
+		Text  string `json:"text"`
+	}
+	if err := json.Unmarshal(o["changelog"], &got); err != nil {
+		t.Fatalf("changelog = %s: %v", o["changelog"], err)
+	}
+	wantText := "## v1.4.0 - 2026-01-01\n- Add gadgets\n\n## 1.3.1\n" +
+		"- Fix a crash\n\n## 1.3.0\n- Speed up\n"
+	if got.File != "plugins/widget/CHANGELOG.md" || got.Since != "1.2.0" ||
+		got.Text != wantText {
+		t.Errorf("changelog = %+v", got)
+	}
+}
+
+func TestOutdatedJSONChangelogNullWhenNoneFound(t *testing.T) {
+	t.Parallel()
+	for name, src := range map[string]claudecli.PluginSource{
+		"no entry": changelogSource(t, "## 1.3.0\n"),
+		"no file":  changelogSource(t, ""),
+		"no clone": widgetSource(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			loads := []profileLoad{
+				widgetLoad(homeProfile, "1.2.0", "", "1.4.0", src),
+			}
+			o := renderChangelogJSON(t, loads, outdatedWithChangelogs(loads))[0]
+			if got, ok := o["changelog"]; !ok || string(got) != "null" {
+				t.Errorf("changelog = %s (present %v), want null", got, ok)
+			}
+		})
+	}
+}
+
+func TestOutdatedJSONChangelogAbsentWithoutFlag(t *testing.T) {
+	t.Parallel()
+	loads := []profileLoad{
+		widgetLoad(homeProfile, "1.2.0", "", "1.4.0",
+			changelogSource(t, widgetChangelog)),
+	}
+	o := renderChangelogJSON(t, loads, findOutdated(loads))[0]
+	if got, ok := o["changelog"]; ok {
+		t.Errorf("changelog = %s, want the key absent", got)
+	}
+}
+
+// Through Run a remote catalog source has no clone, and a missing
+// changelog is informational: the exit code stays 0.
+func TestOutdatedRunChangelogKeepsExitCode(t *testing.T) {
+	t.Parallel()
+	list := `{"installed":[{"id":"` + widgetID + `","version":"1.2.0",` +
+		`"scope":"user","enabled":true}],"available":[{"pluginId":"` +
+		widgetID + `","version":"1.4.0","source":{"source":"github",` +
+		`"repo":"` + widgetRepo + `","sha":"` + latestSHA +
+		`","path":"plugins/widget"}}]}`
+	r := newOutdatedRunner(map[string][]byte{homeProfile.Path: []byte(list)})
+	code, stdout, stderr := runCmd(t, r, []config.Profile{homeProfile},
+		Options{Command: "outdated", Format: FormatText, Changelog: true})
+	if code != ExitOK || stderr != "" ||
+		!strings.HasSuffix(stdout, "  changelog: no local changelog\n") {
+		t.Errorf("code = %d, stderr = %q, stdout:\n%s", code, stderr, stdout)
+	}
+}
