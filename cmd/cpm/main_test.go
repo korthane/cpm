@@ -308,6 +308,9 @@ func TestRunUnknownTopLevelFlagErrors(t *testing.T) {
 	}
 }
 
+const noProfilesErr = "cpm: no profiles found: pass directories as " +
+	"arguments or configure ~/.config/cpm/config.yaml\n"
+
 // Usage and profile-resolution errors happen before cli.Run, so they stay
 // plain stderr text even under --json.
 func TestRunCommandErrorsBeforeRun(t *testing.T) {
@@ -325,6 +328,9 @@ func TestRunCommandErrorsBeforeRun(t *testing.T) {
 			"cpm: profile /nonexistent is not a directory\n"},
 		{"missing dir json", []string{"outdated", "--json", "/nonexistent"}, 1,
 			"cpm: profile /nonexistent is not a directory\n"},
+		{"no profiles", []string{"outdated"}, 1, noProfilesErr},
+		{"no profiles refresh json", []string{"refresh", "--json"}, 1,
+			noProfilesErr},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

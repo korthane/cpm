@@ -442,3 +442,43 @@ func TestOutdatedRefreshFailureJSON(t *testing.T) {
 		t.Errorf("refresh = %q, want failed", p.Refresh)
 	}
 }
+
+func TestOutdatedAllErroredJSON(t *testing.T) {
+	t.Parallel()
+	r := &claudecli.FakeRunner{Default: claudecli.FakeResponse{
+		Err: errors.New("boom"),
+	}}
+	code, stdout, stderr := runCmd(t, r,
+		[]config.Profile{homeProfile, workProfile},
+		Options{Command: "outdated", Format: FormatJSON})
+	if code != 1 || stderr != "" {
+		t.Errorf("code %d stderr %q, want 1 and empty", code, stderr)
+	}
+	doc := decodeOutdated(t, stdout)
+	if len(doc.Profiles) != 2 {
+		t.Fatalf("profiles = %+v, want both", doc.Profiles)
+	}
+	for _, p := range doc.Profiles {
+		if p.Error != "boom" || p.Refresh != "skipped" {
+			t.Errorf("profile = %+v, want error boom, refresh skipped", p)
+		}
+	}
+	if !strings.Contains(stdout, `"outdated":[]`) {
+		t.Errorf("stdout = %s, want an empty outdated array", stdout)
+	}
+}
+
+// With no catalog entry there is no latest version, so nothing is outdated.
+func TestOutdatedEmptyCatalog(t *testing.T) {
+	t.Parallel()
+	r := newOutdatedRunner(map[string][]byte{
+		homeProfile.Path: pluginList([]fakeInstall{
+			{id: "foo@acme", version: "0.34.0", scope: "user", enabled: true},
+		}, nil),
+	})
+	code, stdout, stderr := runCmd(t, r, []config.Profile{homeProfile},
+		Options{Command: "outdated", Format: FormatText})
+	if code != 0 || stdout != "all plugins up to date\n" || stderr != "" {
+		t.Errorf("code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+}

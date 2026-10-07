@@ -125,3 +125,17 @@ func TestRefreshJSONNoProfilesIsEmptyArray(t *testing.T) {
 		t.Errorf("stdout = %q", stdout)
 	}
 }
+
+func TestRefreshAllFailedText(t *testing.T) {
+	t.Parallel()
+	code, stdout, stderr := runCmd(t,
+		refreshRunner(homeProfile.Path, workProfile.Path),
+		[]config.Profile{homeProfile, workProfile},
+		Options{Command: "refresh", Format: FormatText})
+	if code != 1 || stdout != "" {
+		t.Errorf("code %d stdout %q, want 1 and empty", code, stdout)
+	}
+	if stderr != "error: home: offline\nerror: work: offline\n" {
+		t.Errorf("stderr = %q", stderr)
+	}
+}

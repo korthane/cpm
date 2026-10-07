@@ -374,13 +374,19 @@ in Task 1.
 - [x] run `make test` and `make lint` - must pass before next task
 
 ### Task 7: Verify acceptance criteria
-- [ ] verify all requirements from Overview are implemented
-- [ ] verify edge cases: no profiles found, all profiles erroring, a plugin
+
+**Files:**
+- ➕ Modify: `internal/cli/outdated_test.go`, `internal/cli/refresh_test.go`,
+  `cmd/cpm/main_test.go` (edge-case tests: no profiles via `run`, all
+  profiles erroring for `outdated --json` and `refresh --text`, empty catalog)
+
+- [x] verify all requirements from Overview are implemented
+- [x] verify edge cases: no profiles found, all profiles erroring, a plugin
   installed at two scopes in one profile, an empty catalog
-- [ ] run full test suite: `make test`
-- [ ] run race check: `go test -race ./internal/cli/... ./internal/claudecli/...`
-- [ ] run linter: `make lint`
-- [ ] verify coverage ≥ 80% on `internal/cli` and `internal/claudecli`
+- [x] run full test suite: `make test`
+- [x] run race check: `go test -race ./internal/cli/... ./internal/claudecli/...`
+- [x] run linter: `make lint`
+- [x] verify coverage ≥ 80% on `internal/cli` and `internal/claudecli`
   (`go test -cover ./internal/...`)
 
 ### Task 8: [Final] Update documentation
