@@ -1245,6 +1245,29 @@ func TestOutdatedTextChangelogCloneNotLocated(t *testing.T) {
 	}
 }
 
+// Links come from a linkable remote source, but the changelog is read from
+// another profile's clone of the same latest version.
+func TestOutdatedTextChangelogPrefersLocalClone(t *testing.T) {
+	t.Parallel()
+	local := changelogSource(t, widgetChangelog)
+	local.RepoURL, local.Commit = "", ""
+	got := renderChangelogText(t, []profileLoad{
+		widgetLoad(homeProfile, "1.3.1", "", "1.4.0", widgetSource()),
+		widgetLoad(workProfile, "1.3.1", "", "1.4.0", local),
+	})
+	want := `widget@example-market  latest 1.4.0
+  home  1.3.1
+  work  1.3.1
+  history: ` + widgetHistory + `
+  changelog (plugins/widget/CHANGELOG.md):
+    ## v1.4.0 - 2026-01-01
+    - Add gadgets
+`
+	if got != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // Changelog text is third-party: control characters must not reach the
 // terminal raw, while a tab is expanded rather than quoting the line.
 func TestOutdatedTextChangelogQuotesControlCharacters(t *testing.T) {

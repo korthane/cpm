@@ -138,7 +138,10 @@ behavior.
   equals the merged latest (version compare, not string equality), so link
   and version agree; ties prefer a source that can build links (a GitHub
   `RepoURL` and a valid `Commit`, the `ChangeLinks` rules), then a
-  non-stale profile, then profile order.
+  non-stale profile, then profile order. `--changelog` reads from
+  `model.ChangelogSource` instead (same rules, but a source with a
+  `CloneDir` wins the tie), so an equal-version remote source picked for
+  links cannot hide another profile's readable clone.
   Matrix/group builders keep their signatures — the UI calls it for the
   selected row only.
 - Link parts are third-party data and the URL may reach the system opener,

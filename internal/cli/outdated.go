@@ -61,6 +61,8 @@ type outdatedPlugin struct {
 	installs []outdatedInstall
 	// source is where latest lives, from the profile that supplied it.
 	source claudecli.PluginSource
+	// changelogSource is source, unless another profile has a local clone.
+	changelogSource claudecli.PluginSource
 	// history lists the latest commits touching the plugin; "" if unknown.
 	history string
 	// changelog is nil unless --changelog asked for it.
@@ -76,7 +78,7 @@ type pluginChangelog struct {
 	missing string
 }
 
-// attachChangelogs reads each plugin's changelog from the clone its latest
+// attachChangelogs reads each plugin's changelog from a clone its latest
 // version lives in. The excerpt starts after the oldest install, so every
 // install's missing entries are covered.
 func attachChangelogs(outdated []outdatedPlugin) {
@@ -88,7 +90,7 @@ func attachChangelogs(outdated []outdatedPlugin) {
 				since = in.plugin.Version
 			}
 		}
-		op.changelog = readPluginChangelog(op.source, op.id.Name, since,
+		op.changelog = readPluginChangelog(op.changelogSource, op.id.Name, since,
 			op.latest)
 	}
 }
@@ -175,6 +177,8 @@ func findOutdated(loads []profileLoad) []outdatedPlugin {
 			if !ok {
 				op = &outdatedPlugin{id: p.ID, latest: latest[p.ID]}
 				op.source, _ = model.LatestSource(perProfile, p.ID, op.latest)
+				op.changelogSource, _ = model.ChangelogSource(perProfile, p.ID,
+					op.latest)
 				_, op.history = model.ChangeLinks(op.source, "")
 				byID[p.ID] = op
 			}

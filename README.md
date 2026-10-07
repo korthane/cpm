@@ -387,7 +387,8 @@ foo@acme  latest 0.35.1
 
 The file is read from the local marketplace clone — the plugin's own
 directory first, then the clone root — and its path is shown in the header
-line. Version headings such as `## 1.2.0`, `## v1.2.0 - date`,
+line. When several profiles have the latest version, one with a local clone
+is read even if the links come from another profile's remote source. Version headings such as `## 1.2.0`, `## v1.2.0 - date`,
 `## [1.2.0]`, `## [1.2.0](link)`, `## Version 1.2.0` and `## Release 1.2.0`
 are recognized; in a changelog shared by several plugins, headings prefixed
 with the plugin name (`## foo v0.35.1`, or `## foo@acme v0.35.1`) select

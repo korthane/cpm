@@ -571,3 +571,70 @@ func TestLatestSource(t *testing.T) {
 		})
 	}
 }
+
+func TestChangelogSource(t *testing.T) {
+	p := id("p", "m")
+	lv := func(version string, src claudecli.PluginSource,
+		stale bool) claudecli.LatestVersions {
+		return claudecli.LatestVersions{
+			Versions: map[claudecli.PluginID]string{p: version},
+			Sources:  map[claudecli.PluginID]claudecli.PluginSource{p: src},
+			Stale:    stale,
+		}
+	}
+	remote := claudecli.PluginSource{RepoURL: "owner/repo", Commit: "remote"}
+	clone := func(dir string) claudecli.PluginSource {
+		return claudecli.PluginSource{Path: "plugins/p", CloneDir: dir}
+	}
+
+	tests := []struct {
+		name       string
+		perProfile []claudecli.LatestVersions
+		latest     string
+		want       claudecli.PluginSource
+		wantOK     bool
+	}{
+		{
+			name: "local clone beats an earlier linkable remote",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", remote, false), lv("2.0.0", clone("/c"), false),
+			},
+			latest: "2.0.0", want: clone("/c"), wantOK: true,
+		},
+		{
+			name: "stale local clone still beats a fresh remote",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", remote, false), lv("2.0.0", clone("/c"), true),
+			},
+			latest: "2.0.0", want: clone("/c"), wantOK: true,
+		},
+		{
+			name: "tie among clones prefers a non-stale profile",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", clone("/stale"), true),
+				lv("2.0.0", clone("/fresh"), false),
+			},
+			latest: "2.0.0", want: clone("/fresh"), wantOK: true,
+		},
+		{
+			name: "clone of an older version is skipped",
+			perProfile: []claudecli.LatestVersions{
+				lv("1.0.0", clone("/old"), false), lv("2.0.0", remote, false),
+			},
+			latest: "2.0.0", want: remote, wantOK: true,
+		},
+		{
+			name:   "empty latest",
+			latest: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ChangelogSource(tt.perProfile, p, tt.latest)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("ChangelogSource = (%+v, %v), want (%+v, %v)",
+					got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}

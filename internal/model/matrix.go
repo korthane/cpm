@@ -126,10 +126,10 @@ func MergeLatestVersions(perProfile []claudecli.LatestVersions) (map[claudecli.P
 	return latest, stale
 }
 
-// LatestSource tie ranks: linkable outweighs fresh, so they cannot tie.
+// latestSourceBy tie ranks: preferred outweighs fresh, so they cannot tie.
 const (
-	freshRank    = 1
-	linkableRank = 2
+	freshRank     = 1
+	preferredRank = 2
 )
 
 // LatestSource returns where the merged latest version of a plugin lives:
@@ -139,6 +139,24 @@ const (
 // one. ok is false when latest is empty or no such profile has one.
 func LatestSource(perProfile []claudecli.LatestVersions, id claudecli.PluginID,
 	latest string) (claudecli.PluginSource, bool) {
+	return latestSourceBy(perProfile, id, latest,
+		func(src claudecli.PluginSource) bool {
+			_, _, ok := linkBase(src)
+			return ok
+		})
+}
+
+// ChangelogSource is LatestSource for reading the changelog: among ties a
+// source with a local clone wins instead of a linkable one.
+func ChangelogSource(perProfile []claudecli.LatestVersions,
+	id claudecli.PluginID, latest string) (claudecli.PluginSource, bool) {
+	return latestSourceBy(perProfile, id, latest,
+		func(src claudecli.PluginSource) bool { return src.CloneDir != "" })
+}
+
+func latestSourceBy(perProfile []claudecli.LatestVersions,
+	id claudecli.PluginID, latest string,
+	preferred func(claudecli.PluginSource) bool) (claudecli.PluginSource, bool) {
 	if latest == "" {
 		return claudecli.PluginSource{}, false
 	}
@@ -154,8 +172,8 @@ func LatestSource(perProfile []claudecli.LatestVersions, id claudecli.PluginID,
 			continue
 		}
 		rank := 0
-		if _, _, ok := linkBase(src); ok {
-			rank += linkableRank
+		if preferred(src) {
+			rank += preferredRank
 		}
 		if !lv.Stale {
 			rank += freshRank
