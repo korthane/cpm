@@ -26,28 +26,45 @@ const CommandTimeout = 2 * time.Minute
 // that profile; an empty profileDir targets the default profile, stripping any
 // ambient CLAUDE_CONFIG_DIR from the environment.
 // Run returns the command's stdout. A non-zero exit is reported as a *RunError
-// carrying the captured stderr.
+// carrying the captured stdout and stderr.
 type Runner interface {
 	Run(ctx context.Context, profileDir string, args ...string) ([]byte, error)
 }
 
+// maxDetailRunes bounds the stdout excerpt in an error: a failed --json call
+// can print a whole document there.
+const maxDetailRunes = 300
+
 // RunError describes a failed claude CLI invocation.
 type RunError struct {
 	Args   []string
+	Stdout string
 	Stderr string
 	Err    error
 }
 
 func (e *RunError) Error() string {
 	msg := fmt.Sprintf("claude %s: %v", strings.Join(e.Args, " "), e.Err)
-	// The message renders inside single-line table cells; strip ANSI escape
-	// sequences (CLIs colorize stderr, and a sequence cut by cell truncation
-	// garbles the whole row) and collapse interior newlines and whitespace
-	// runs so multi-line stderr cannot split a row.
-	if s := strings.Join(strings.Fields(ansi.Strip(e.Stderr)), " "); s != "" {
-		msg += ": " + s
+	// Some commands (e.g. `plugin marketplace update`) report failures on
+	// stdout and leave stderr empty, so stdout is the fallback detail.
+	detail := oneLine(e.Stderr)
+	if detail == "" {
+		detail = oneLine(e.Stdout)
+		if r := []rune(detail); len(r) > maxDetailRunes {
+			detail = string(r[:maxDetailRunes]) + "…"
+		}
+	}
+	if detail != "" {
+		msg += ": " + detail
 	}
 	return msg
+}
+
+// oneLine makes CLI output safe for single-line table cells: ANSI escapes
+// are stripped (a sequence cut by cell truncation garbles the whole row) and
+// newlines and whitespace runs collapse to single spaces.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(ansi.Strip(s)), " ")
 }
 
 func (e *RunError) Unwrap() error { return e.Err }
@@ -92,7 +109,9 @@ func (r *realRunner) Run(ctx context.Context, profileDir string, args ...string)
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return stdout.Bytes(), &RunError{Args: args, Stderr: stderr.String(), Err: err}
+		return stdout.Bytes(), &RunError{
+			Args: args, Stdout: stdout.String(), Stderr: stderr.String(), Err: err,
+		}
 	}
 	return stdout.Bytes(), nil
 }

@@ -150,6 +150,53 @@ func TestRealRunnerSurfacesNonZeroExitAndStderr(t *testing.T) {
 	}
 }
 
+func TestRealRunnerSurfacesStdoutWhenStderrIsEmpty(t *testing.T) {
+	// Mirrors `plugin marketplace update`, which reports a partial failure on
+	// stdout and leaves stderr empty.
+	stub := writeScript(t, "#!/bin/sh\n"+
+		`echo "1 marketplace could not be refreshed: acme"`+"\nexit 1\n")
+	r := &realRunner{binary: stub}
+
+	_, err := r.Run(t.Context(), "", "plugin", "marketplace", "update")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "could not be refreshed: acme") {
+		t.Errorf("Error() = %q, want it to include stdout", err.Error())
+	}
+}
+
+func TestRunErrorPrefersStderrOverStdout(t *testing.T) {
+	err := &RunError{
+		Args:   []string{"plugin", "list"},
+		Stdout: "partial output",
+		Stderr: "real cause",
+		Err:    errors.New("exit status 1"),
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "real cause") || strings.Contains(msg, "partial") {
+		t.Errorf("Error() = %q, want stderr only", msg)
+	}
+}
+
+func TestRunErrorTruncatesLongStdout(t *testing.T) {
+	err := &RunError{
+		Args:   []string{"plugin", "list", "--json"},
+		Stdout: strings.Repeat("x", 2*maxDetailRunes),
+		Err:    errors.New("exit status 1"),
+	}
+
+	msg := err.Error()
+	// Stdout of a failed --json call can be a whole document; only a bounded
+	// excerpt belongs in a one-line error.
+	want := ": " + strings.Repeat("x", maxDetailRunes) + "…"
+	if !strings.HasSuffix(msg, want) {
+		t.Errorf("Error() = %q, want stdout cut to %d runes plus …",
+			msg, maxDetailRunes)
+	}
+}
+
 func TestRunErrorCollapsesMultiLineStderr(t *testing.T) {
 	err := &RunError{
 		Args:   []string{"plugin", "list"},
