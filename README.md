@@ -36,14 +36,18 @@ cpm is a thin front end over the public `claude` CLI: all reads use
 `claude ... --json` (except `claude mcp list`, which has no JSON mode and is
 parsed as plain text) and all mutations use `claude plugin ...` / `claude mcp
 remove`, each invoked with `CLAUDE_CONFIG_DIR` pointed at the target profile.
-cpm never edits Claude's internal JSON files directly.
+cpm never edits Claude's internal JSON files directly. The one file it reads
+itself is `<profile>/plugins/installed_plugins.json`, for the commit each
+plugin was installed from (the CLI does not report it); the read is
+best-effort, and without it change links are simply left out.
 
 ## Requirements
 
 - The `claude` CLI must be on `PATH` — every read and action shells out to it.
 - `git` on `PATH` is optional but recommended: marketplace freshness (commit
   hash and date) is read from each clone with `git log`; without it those
-  header cells stay blank.
+  header cells stay blank, and plugins stored in the clone get no change
+  links.
 - The fold chevrons are NerdFont glyphs; without a NerdFont-patched terminal
   font they render as replacement boxes (cosmetic only).
 - Go 1.26.4+ to build from source.
@@ -69,10 +73,12 @@ make run     # go run ./cmd/cpm
 cpm                              # auto-discover ~/.claude* profiles
 cpm ~/.claude ~/.claude-work     # show only these profiles, in this order
 cpm -h                           # print usage
+cpm outdated                     # non-interactive: see Command-line mode
 ```
 
-cpm takes no flags other than `-h`/`--help`; any other dashed argument is
-rejected as a typo rather than treated as a profile directory.
+Without a command, cpm takes no flags other than `-h`/`--help`; any other
+dashed argument is rejected as a typo rather than treated as a profile
+directory.
 
 On start the table shell renders immediately and every profile column loads in
 parallel (a per-column spinner shows until its data arrives). Loading a profile
@@ -183,6 +189,19 @@ Plugins tab, on a plugin row, applied to the selected cell:
 | `u` | update (installed plugin) |
 | `x` | uninstall (installed plugin; asks `y/n`) |
 | `i` | install into a profile where the plugin is absent |
+| `o` | open the change link of an outdated install in the browser |
+
+When the selected cell is an outdated install and cpm can build a link for
+it, the status line below the table shows `changes: <url>` — a GitHub
+compare view from the installed commit to the latest one, or, when the
+installed commit is unknown, the plugin's commit history (see
+[Change links](#change-links)). `o` opens exactly that URL with the system
+opener (`open` on macOS, `xdg-open` elsewhere) and is listed in the help line
+whenever the selected cell has a link. A status message takes the status
+line first, hiding the link but not the key; a pending confirmation hides
+both, since any key but `y` answers it with "no". cpm
+opens only `https://github.com/` URLs; an opener still running after 5
+seconds (`xdg-open` may wait for the browser to exit) counts as success.
 
 Plugins tab, on a marketplace header row:
 
@@ -231,3 +250,252 @@ directory instead.
   with the CLI's error; use `claude mcp remove` in the owning directory for
   those. Plugin-provided servers cannot be removed this way either; cpm blocks
   the action and suggests uninstalling the plugin.
+
+## Command-line mode
+
+A command as the first argument makes cpm print a result and exit instead of
+starting the TUI — for scripts, agents and quick checks:
+
+```sh
+cpm outdated [--refresh] [--changelog] [--text|--json] [<profile-dir> ...]
+cpm refresh  [--text|--json] [<profile-dir> ...]
+cpm <command> --help
+```
+
+Profiles resolve exactly as for the TUI (args > config file >
+auto-discovery). Flags and profile dirs may be interleaved; `--text` (the
+default) and `--json` are mutually exclusive. A profile dir named like a
+command is reached as `./outdated`. Profiles load in parallel, each bounded
+by the same two-minute timeout as the TUI, and one failing profile does not
+stop the others. Within that budget the marketplace update run by
+`outdated --refresh` is capped at 30 seconds, after which the cached catalog
+is used; `cpm refresh` gives the update the full two minutes.
+
+### `cpm outdated`
+
+Lists every installed plugin whose version is behind the newest version
+found in any profile's marketplace catalog, with the profiles holding the
+old version. It reads the cached catalogs; for a plugin stored inside the
+marketplace clone, its own `plugin.json` version wins over the catalog entry
+(as in Claude Code), since catalogs often lag it. `--refresh`
+runs `claude plugin marketplace update` in each profile first (if that fails,
+the cached catalog is used: text mode prints a warning to stderr, JSON
+reports `"refresh": "failed"`). Every installed entry is
+checked, so a plugin installed at both user and project scope in one profile
+is reported if either install is behind. Installs whose version the CLI
+reports as `unknown`, or as a commit hash, are never reported — there is no
+release version to compare; a commit hash in a catalog never counts as the
+latest version either. Neither are installed plugins whose catalog entry
+points outside the marketplace clone (a remote `url`, `git-subdir` or
+GitHub source) and carries neither a `version` nor a version-like `ref`:
+with no `plugin.json` in the clone, no latest version is known for them.
+
+```text
+$ cpm outdated
+bar@acme  latest 6.4.1
+  work  6.3.0   (disabled)
+    changes: https://github.com/acme/plugins/compare/1a2b3c4...5d6e7f8
+  history: https://github.com/acme/plugins/commits/5d6e7f8/plugins/bar
+foo@acme  latest 0.35.1
+  home  0.34.0
+  work  0.34.0
+    changes: https://github.com/acme/foo/compare/9a8b7c6...0f1e2d3
+```
+
+(Commit SHAs are shortened in these samples; cpm prints them as recorded,
+usually in full.)
+
+Plugins are sorted by marketplace, then name; installs follow profile order.
+Profiles are shown by their config.yaml label, or by the directory name
+(e.g. `.claude-work`) when none is set; two profiles sharing a label are
+shown by path instead. An install at a non-`user` scope is marked
+`(scope: project)`. With nothing outdated it
+prints `all plugins up to date` — unless a profile failed to load or could
+not be fully checked, in which case stdout stays empty, since nothing proves
+that profile is current.
+
+If a profile's `claude plugin marketplace list` fails, its catalog files
+cannot be located, so its installed plugins (which the CLI's `available`
+list leaves out) are checked only against other profiles' catalogs. Text
+mode reports `error: work: marketplace list failed; its catalogs were not
+read, so outdated plugins may be missed` on stderr, JSON marks the profile
+`"incomplete": true`, and the exit code is `1`. Outdated installs that were
+found — in that profile too — are still listed.
+
+#### Change links
+
+Each install can be followed by an indented `changes:` line: a GitHub
+compare page from the commit that install came from to the commit the latest
+version comes from, i.e. exactly what an update would bring in. A plugin
+living in a subdirectory of its repository (a multi-plugin marketplace)
+also gets one `history:` line after its installs: the commit history of
+that directory at the latest commit. A compare page cannot be narrowed to a
+path, so in a shared repository it also lists other plugins' commits; the
+history link shows only this plugin's. A line is left out when its link
+cannot be built — e.g. the installed commit is unknown (some installs, such
+as older ones or directory sources, record none), or the two commits are
+the same.
+
+Links are built offline from data already on disk:
+
+- The installed commit comes from the profile's
+  `plugins/installed_plugins.json`.
+- For a plugin stored in the marketplace clone, the latest commit is the
+  clone's `HEAD` and the repository is the marketplace's GitHub repo.
+- For a plugin whose catalog entry points elsewhere (a remote `url`,
+  `git-subdir` or GitHub source), they come from that entry: its pinned
+  `sha`, else its `ref`. A `ref` is best-effort — a branch can move after
+  the catalog was fetched — so such links are exact only when both ends are
+  pinned commits.
+- The latest commit is taken from the same profile that supplied the
+  latest version, so link and version always agree. When several profiles
+  have it, one whose source names both a repository and a commit is
+  preferred, then one whose catalog refresh did not fail.
+- A `refs/tags/` or `refs/heads/` prefix on a `ref` is dropped; a ref with
+  any other `/` (e.g. `release/1.x`) gets no links.
+
+Only GitHub repositories get links. Marketplaces added from a local
+directory, clones without git, and repositories hosted anywhere else get
+none; neither do plugins whose version is a commit hash, since they are
+never reported outdated.
+
+Known limitation: the installed commit and the latest one are assumed to
+live in the same repository. If profiles point a same-named marketplace at
+different forks, or a plugin moved between its marketplace clone and a
+remote source, the compare link pairs commits from two repositories and
+GitHub shows an error page; the history link is unaffected.
+
+#### `--changelog`
+
+`--changelog` adds, once per plugin, the entries of its `CHANGELOG.md` from
+the latest version (inclusive) down to the oldest version installed in any
+profile (exclusive), so every install's missing entries are covered:
+
+```text
+$ cpm outdated --changelog
+foo@acme  latest 0.35.1
+  home  0.34.0
+  work  0.34.0
+    changes: https://github.com/acme/foo/compare/9a8b7c6...0f1e2d3
+  changelog (CHANGELOG.md):
+    ## v0.35.1 - 2026-01-01
+    - Fix the widget refresh.
+
+    ## v0.35.0 - 2025-12-15
+    - Add the widget panel.
+```
+
+The file is read from the local marketplace clone — the plugin's own
+directory first, then the clone root — and its path is shown in the header
+line. When several profiles have the latest version, one with a local clone
+is read even if the links come from another profile's remote source. Version headings such as `## 1.2.0`, `## v1.2.0 - date`,
+`## [1.2.0]`, `## [1.2.0](link)`, `## Version 1.2.0` and `## Release 1.2.0`
+are recognized; in a changelog shared by several plugins, headings prefixed
+with the plugin name (`## foo v0.35.1`, or `## foo@acme v0.35.1`) select
+that plugin's sections only. Sections are shown newest first whatever the
+file's order, so an oldest-first changelog works too; an `## Unreleased`
+heading ends the section above it and is never shown. Headings inside code
+blocks are ignored and long excerpts are cut at 200 lines.
+
+Known limitation: a plugin in a subdirectory without its own `CHANGELOG.md`
+falls back to the clone-root file. If that file versions something else
+with plain headings and one of them happens to equal the plugin's latest
+version, that entry is shown as the plugin's; the header line names the
+file, so the source stays visible.
+
+When there is nothing to show, a single line says why:
+
+- `changelog: no entry for 0.35.1` — the file has no heading for the latest
+  version (it may track something else, e.g. the app rather than the
+  plugin);
+- `changelog: no CHANGELOG.md` — the clone has no readable one (missing,
+  not a regular file, a link out of the clone, or over 1 MiB);
+- `changelog: no local changelog` — the plugin lives outside the
+  marketplace clone, or cpm could not locate the clone the latest version
+  came from (that profile's marketplace list failed, or no profile said
+  where the latest version lives), so there is nothing local to read.
+
+The changelog is informational and never changes the exit code. Only
+`outdated` accepts `--changelog`; `cpm refresh --changelog` is a usage
+error.
+
+```sh
+$ cpm outdated --json
+```
+
+```json
+{
+  "profiles": [
+    {"label": "home", "path": "/home/me/.claude", "refresh": "skipped",
+     "error": "", "incomplete": false},
+    {"label": "work", "path": "/home/me/.claude-work", "refresh": "skipped",
+     "error": "", "incomplete": false}
+  ],
+  "outdated": [
+    {"plugin": "foo@acme", "latest": "0.35.1",
+     "installs": [
+       {"label": "home", "path": "/home/me/.claude", "version": "0.34.0",
+        "scope": "user", "enabled": true,
+        "compare_url": "https://github.com/acme/foo/compare/9a8b7c6...0f1e2d3"}
+     ],
+     "history_url": ""}
+  ]
+}
+```
+
+(Pretty-printed here; the actual output is one line.) `outdated` is always
+an array, never `null`. `refresh` is `skipped` (no `--refresh`, or the
+profile failed to load), `ok`, or `failed` (stale catalog used); `error` is
+empty unless the profile failed to load; `incomplete` is `true` when the
+profile loaded but its marketplace list failed, so its installed plugins
+were checked only against other profiles' catalogs. `compare_url` (per
+install) and `history_url` (per plugin) are the links described above, `""`
+when unknown. With `--changelog` each plugin also carries `"changelog":
+{"file": "CHANGELOG.md", "since": "0.34.0", "text": "## v0.35.1 …"}` —
+`file` is the path inside the clone, `since` the exclusive lower bound,
+`text` the raw excerpt — or `"changelog": null` in any of the three
+nothing-to-show cases; without the flag the key is absent.
+
+JSON is the stable interface for scripts: new data is only ever added as new
+fields. The text layout is for people and may gain lines — such as the indented
+`changes:`, `history:` and `changelog` lines — that a line-parsing script
+could trip over.
+
+### `cpm refresh`
+
+Runs `claude plugin marketplace update` in every profile and reports each
+result:
+
+```text
+$ cpm refresh
+home  ok
+work  ok
+```
+
+A failed profile goes to stderr as `error: work: <message>`. With `--json`:
+`{"profiles":[{"label":"home","path":"/home/me/.claude","error":""}, ...]}`.
+
+A refresh writes to the profile's marketplace clones and is not coordinated
+with other processes: avoid running it (or `outdated --refresh`) while a cpm
+TUI or `claude` is working on the same profile.
+
+### Streams and exit codes
+
+Results go to stdout. In text mode errors and warnings go to stderr, and a
+value holding control characters (a plugin ID, version, label, error
+message, link, changelog file name or changelog line) is printed Go-quoted
+so it cannot forge lines; tabs in changelog lines are expanded to four
+spaces instead, so indented Markdown stays readable. In JSON
+mode command results and per-profile errors are carried inside the JSON and
+stderr stays empty; usage errors, profile-resolution errors and a failed
+stdout write are still plain stderr text.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | success — including when outdated plugins are found, and when a `--refresh` failed but the cached catalog was used |
+| `1` | a profile failed to load (for `cpm refresh`: failed to refresh) or, for `cpm outdated`, could not be fully checked (`incomplete`), profiles could not be resolved (none found, a path that is not a directory, a malformed `config.yaml`, an unresolvable `$HOME`), or stdout could not be written |
+| `2` | usage error in a command: unknown flag (`cpm outdated --bogus`), `--text` with `--json`, a profile dir starting with `-` |
+
+Without a command, a bad argument such as `cpm --bogus` keeps the TUI
+launcher's behavior and exits `1` — so does a flag placed before the command
+(`cpm --json outdated`), which is not a command line.

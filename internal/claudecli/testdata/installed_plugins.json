@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "plugins": {
+    "widget@example-market": [
+      {
+        "scope": "user",
+        "installPath": "/home/u/.claude/plugins/cache/example-market/widget/1.2.0",
+        "version": "1.2.0",
+        "installedAt": "2026-01-01T10:00:00.000Z",
+        "lastUpdated": "2026-02-01T10:00:00.000Z",
+        "gitCommitSha": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+      }
+    ],
+    "gadget@example-market": [
+      {
+        "scope": "user",
+        "installPath": "/home/u/.claude/plugins/cache/example-market/gadget/0.3.0",
+        "version": "0.3.0",
+        "installedAt": "2026-01-01T10:00:00.000Z",
+        "lastUpdated": "2026-01-01T10:00:00.000Z"
+      }
+    ],
+    "helper@acme-tools": [
+      {
+        "scope": "project",
+        "projectPath": "/work/alpha",
+        "installPath": "/home/u/.claude/plugins/cache/acme-tools/helper/2.0.0",
+        "version": "2.0.0",
+        "installedAt": "2026-01-01T10:00:00.000Z",
+        "lastUpdated": "2026-01-01T10:00:00.000Z",
+        "gitCommitSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "scope": "project",
+        "projectPath": "/work/beta",
+        "installPath": "/home/u/.claude/plugins/cache/acme-tools/helper/2.1.0",
+        "version": "2.1.0",
+        "installedAt": "2026-01-01T10:00:00.000Z",
+        "lastUpdated": "2026-01-01T10:00:00.000Z",
+        "gitCommitSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ]
+  }
+}

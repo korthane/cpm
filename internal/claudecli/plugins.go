@@ -31,17 +31,21 @@ func (id PluginID) String() string {
 // InstalledPlugin is a plugin present in a profile. Version is empty when the
 // CLI reports it as "unknown". Scope is where the plugin is installed ("user",
 // "project", or "local"); non-user scopes are cwd-dependent, so cpm's
-// `--scope user`-pinned actions cannot touch them.
+// `--scope user`-pinned actions cannot touch them. InstallPath is the
+// plugin's cache directory; CommitSHA is the commit it was installed from,
+// empty when unknown (see fillInstalledCommits).
 type InstalledPlugin struct {
-	ID      PluginID
-	Version string
-	Enabled bool
-	Scope   string
+	ID          PluginID
+	Version     string
+	Enabled     bool
+	Scope       string
+	InstallPath string
+	CommitSHA   string
 }
 
 // AvailablePlugin is a marketplace catalog entry. LatestVersion is empty when
 // the catalog carries no version (e.g. a branch ref or a bare url source);
-// the marketplace.json fallback in LoadPluginsFresh resolves those.
+// the marketplace.json fallback in LoadPluginsCached resolves those.
 type AvailablePlugin struct {
 	ID            PluginID
 	LatestVersion string
@@ -64,10 +68,11 @@ type PluginData struct {
 }
 
 type installedJSON struct {
-	ID      string `json:"id"`
-	Version string `json:"version"`
-	Enabled bool   `json:"enabled"`
-	Scope   string `json:"scope"`
+	ID          string `json:"id"`
+	Version     string `json:"version"`
+	Enabled     bool   `json:"enabled"`
+	Scope       string `json:"scope"`
+	InstallPath string `json:"installPath"`
 }
 
 // availableJSON matches an `available[]` catalog entry. `source` is
@@ -80,8 +85,15 @@ type availableJSON struct {
 	Source   json.RawMessage `json:"source"`
 }
 
+// sourceJSON is an object `source` of a catalog entry: a remote repo given
+// by `repo` (github) or `url` (url, git-subdir), with optional `path`
+// inside it, `ref` and pinned `sha`.
 type sourceJSON struct {
-	Ref string `json:"ref"`
+	Repo string `json:"repo"`
+	URL  string `json:"url"`
+	Path string `json:"path"`
+	Ref  string `json:"ref"`
+	SHA  string `json:"sha"`
 }
 
 type pluginListJSON struct {
@@ -89,16 +101,18 @@ type pluginListJSON struct {
 	Available []availableJSON `json:"available"`
 }
 
-// LoadPlugins fetches and parses installed + available plugins for one profile.
-func LoadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, error) {
+// loadPlugins fetches and parses installed + available plugins for one
+// profile, plus each available entry's raw `source`, index-aligned with
+// PluginData.Available.
+func loadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, []json.RawMessage, error) {
 	out, err := r.Run(ctx, profileDir, "plugin", "list", "--available", "--json")
 	if err != nil {
-		return PluginData{}, err
+		return PluginData{}, nil, err
 	}
 
 	var raw pluginListJSON
 	if err := json.Unmarshal(out, &raw); err != nil {
-		return PluginData{}, fmt.Errorf("parse plugin list: %w", err)
+		return PluginData{}, nil, fmt.Errorf("parse plugin list: %w", err)
 	}
 
 	data := PluginData{}
@@ -108,19 +122,22 @@ func LoadPlugins(ctx context.Context, r Runner, profileDir string) (PluginData, 
 			version = ""
 		}
 		data.Installed = append(data.Installed, InstalledPlugin{
-			ID:      ParsePluginID(p.ID),
-			Version: version,
-			Enabled: p.Enabled,
-			Scope:   p.Scope,
+			ID:          ParsePluginID(p.ID),
+			Version:     version,
+			Enabled:     p.Enabled,
+			Scope:       p.Scope,
+			InstallPath: p.InstallPath,
 		})
 	}
+	sources := make([]json.RawMessage, 0, len(raw.Available))
 	for _, a := range raw.Available {
 		data.Available = append(data.Available, AvailablePlugin{
 			ID:            ParsePluginID(a.PluginID),
 			LatestVersion: latestVersion(a),
 		})
+		sources = append(sources, a.Source)
 	}
-	return data, nil
+	return data, sources, nil
 }
 
 // latestVersion resolves a catalog entry's version: the explicit `version`

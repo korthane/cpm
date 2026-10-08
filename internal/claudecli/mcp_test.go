@@ -25,7 +25,7 @@ func TestParseMCPListFixture(t *testing.T) {
 		{Name: "claude.ai Google Drive", Target: "https://drivemcp.googleapis.com/mcp/v1"},
 		{Name: "claude.ai Google Calendar", Target: "https://calendarmcp.googleapis.com/mcp/v1"},
 		{Name: "plugin:playwright:playwright", Target: "npx @playwright/mcp@latest"},
-		{Name: "swifteye", Target: "/Users/alek/src/swifteye/.build/release/swifteye"},
+		{Name: "local-mcp", Target: "/Users/u/src/local-mcp/.build/release/local-mcp"},
 		{Name: "atlassian", Target: "https://mcp.atlassian.com/v1/mcp (HTTP)"},
 		{Name: "macos_automator", Target: "npx -y @steipete/macos-automator-mcp@latest"},
 	}

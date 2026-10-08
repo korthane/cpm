@@ -1,10 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/korthane/cpm/internal/claudecli"
+	"github.com/korthane/cpm/internal/cli"
+	"github.com/korthane/cpm/internal/config"
 )
 
 func TestResolveProfilesFromArgs(t *testing.T) {
@@ -156,5 +163,251 @@ func TestResolveProfilesArgsIgnoreMalformedConfig(t *testing.T) {
 	}
 	if len(profiles) != 1 || profiles[0].Path != p {
 		t.Fatalf("profiles = %+v, want just %s", profiles, p)
+	}
+}
+
+// fakeLauncher records TUI starts instead of launching Bubble Tea.
+type fakeLauncher struct {
+	runner   *claudecli.FakeRunner
+	tuiCalls [][]config.Profile
+	tuiErr   error
+}
+
+func (f *fakeLauncher) launcher() launcher {
+	return launcher{
+		runner: f.runner,
+		startTUI: func(_ claudecli.Runner, profiles []config.Profile) error {
+			f.tuiCalls = append(f.tuiCalls, profiles)
+			return f.tuiErr
+		},
+	}
+}
+
+func runCapture(t *testing.T, f *fakeLauncher, args ...string) (int, string, string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := f.launcher().run(args, &stdout, &stderr)
+	return code, stdout.String(), stderr.String()
+}
+
+func TestRunRoutesCommandToCLI(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{
+		Responses: map[string]claudecli.FakeResponse{
+			"plugin list --available --json": {Stdout: []byte(`{
+				"installed": [{"id": "foo@acme", "version": "0.34.0",
+					"scope": "user", "enabled": true}],
+				"available": [{"pluginId": "foo@acme", "version": "0.35.1"}]
+			}`)},
+			"plugin marketplace list --json": {Stdout: []byte("[]")},
+		},
+	}}
+
+	code, stdout, stderr := runCapture(t, f, "outdated", "--json", dir)
+	if code != 0 || stderr != "" {
+		t.Fatalf("code = %d, stderr = %q, want 0 and empty", code, stderr)
+	}
+	var got struct {
+		Profiles []struct{ Path string } `json:"profiles"`
+		Outdated []struct {
+			Plugin, Latest string
+		} `json:"outdated"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if len(got.Profiles) != 1 || got.Profiles[0].Path != dir {
+		t.Fatalf("profiles = %+v, want just %s", got.Profiles, dir)
+	}
+	if len(got.Outdated) != 1 || got.Outdated[0].Plugin != "foo@acme" ||
+		got.Outdated[0].Latest != "0.35.1" {
+		t.Fatalf("outdated = %+v, want foo@acme latest 0.35.1", got.Outdated)
+	}
+	for _, c := range f.runner.Calls {
+		if c.ProfileDir != dir {
+			t.Fatalf("call %v ran in %q, want %q", c.Args, c.ProfileDir, dir)
+		}
+	}
+	if len(f.tuiCalls) != 0 {
+		t.Fatal("command started the TUI")
+	}
+}
+
+func TestRunCommandHelpPrintsCommandUsage(t *testing.T) {
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+	code, stdout, stderr := runCapture(t, f, "outdated", "--help")
+	if code != 0 || stderr != "" {
+		t.Fatalf("code = %d, stderr = %q, want 0 and empty", code, stderr)
+	}
+	if !strings.HasPrefix(stdout, "usage: cpm outdated") {
+		t.Fatalf("stdout = %q, want the outdated usage", stdout)
+	}
+	if len(f.runner.Calls) != 0 || len(f.tuiCalls) != 0 {
+		t.Fatal("help ran claude or started the TUI")
+	}
+}
+
+func TestRunTopLevelHelpListsCommands(t *testing.T) {
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+	code, stdout, _ := runCapture(t, f, "--help")
+	if code != 0 {
+		t.Fatalf("code = %d, want 0", code)
+	}
+	for _, want := range []string{
+		"cpm outdated", "cpm refresh", "./outdated", "--changelog",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("usage %q lacks %q", stdout, want)
+		}
+	}
+	if len(f.tuiCalls) != 0 {
+		t.Fatal("help started the TUI")
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("disk full")
+}
+
+func TestRunHelpFailedStdoutWriteExitsOne(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"outdated", "--help"}} {
+		f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+		var stderr bytes.Buffer
+		code := f.launcher().run(args, failingWriter{}, &stderr)
+		if code != cli.ExitFailure {
+			t.Errorf("%v: code = %d, want %d", args, code, cli.ExitFailure)
+		}
+		if want := "cpm: write output: disk full\n"; stderr.String() != want {
+			t.Errorf("%v: stderr = %q, want %q", args, stderr.String(), want)
+		}
+	}
+}
+
+func TestRunProfileDirStartsTUI(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+	code, stdout, stderr := runCapture(t, f, dir)
+	if code != 0 || stdout != "" || stderr != "" {
+		t.Fatalf("code = %d, stdout = %q, stderr = %q, want 0 and silent",
+			code, stdout, stderr)
+	}
+	if len(f.tuiCalls) != 1 || len(f.tuiCalls[0]) != 1 ||
+		f.tuiCalls[0][0].Path != dir {
+		t.Fatalf("TUI calls = %+v, want one with %s", f.tuiCalls, dir)
+	}
+	if len(f.runner.Calls) != 0 {
+		t.Fatalf("TUI path ran claude directly: %+v", f.runner.Calls)
+	}
+}
+
+func TestRunTUIErrorExitsOne(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{},
+		tuiErr: errors.New("no tty")}
+
+	code, _, stderr := runCapture(t, f, t.TempDir())
+	if code != 1 || stderr != "cpm: no tty\n" {
+		t.Fatalf("code = %d, stderr = %q, want 1 and the TUI error", code, stderr)
+	}
+}
+
+func TestRunUnknownTopLevelFlagErrors(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+	code, _, stderr := runCapture(t, f, "--bogus")
+	if code != 1 || !strings.Contains(stderr, `unknown flag "--bogus"`) {
+		t.Fatalf("code = %d, stderr = %q, want 1 and unknown flag", code, stderr)
+	}
+	if len(f.tuiCalls) != 0 {
+		t.Fatal("unknown flag started the TUI")
+	}
+}
+
+// A flag before the command takes the TUI path, which rejects it with the
+// TUI's exit 1; only usage errors inside a command exit 2.
+func TestRunFlagBeforeCommandExitsOne(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+	code, _, stderr := runCapture(t, f, "--json", "outdated")
+	if code != 1 || !strings.Contains(stderr, `unknown flag "--json"`) {
+		t.Fatalf("code = %d, stderr = %q, want 1 and unknown flag", code, stderr)
+	}
+	if len(f.tuiCalls) != 0 || len(f.runner.Calls) != 0 {
+		t.Fatal("flag before the command ran claude or started the TUI")
+	}
+}
+
+// A profile dir named like a command is reached as ./outdated.
+func TestRunCommandNamedDirStartsTUI(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "outdated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+	code, _, stderr := runCapture(t, f, "./outdated")
+	if code != 0 || stderr != "" {
+		t.Fatalf("code = %d, stderr = %q, want 0 and empty", code, stderr)
+	}
+	if len(f.tuiCalls) != 1 || len(f.tuiCalls[0]) != 1 ||
+		filepath.Base(f.tuiCalls[0][0].Path) != "outdated" {
+		t.Fatalf("TUI calls = %+v, want one with the outdated dir", f.tuiCalls)
+	}
+	if len(f.runner.Calls) != 0 {
+		t.Fatalf("dir named like a command ran the CLI: %+v", f.runner.Calls)
+	}
+}
+
+const noProfilesErr = "cpm: no profiles found: pass directories as " +
+	"arguments or configure ~/.config/cpm/config.yaml\n"
+
+// Usage and profile-resolution errors happen before cli.Run, so they stay
+// plain stderr text even under --json.
+func TestRunCommandErrorsBeforeRun(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		code int
+		want string
+	}{
+		{"unknown flag", []string{"outdated", "--bogus"}, 2,
+			"cpm: outdated: unknown flag \"--bogus\"\n"},
+		{"unknown flag json", []string{"outdated", "--json", "--bogus"}, 2,
+			"cpm: outdated: unknown flag \"--bogus\"\n"},
+		{"changelog only for outdated", []string{"refresh", "--changelog"}, 2,
+			"cpm: refresh: unknown flag \"--changelog\"\n"},
+		{"missing dir", []string{"outdated", "/nonexistent"}, 1,
+			"cpm: profile /nonexistent is not a directory\n"},
+		{"missing dir json", []string{"outdated", "--json", "/nonexistent"}, 1,
+			"cpm: profile /nonexistent is not a directory\n"},
+		{"no profiles", []string{"outdated"}, 1, noProfilesErr},
+		{"no profiles refresh json", []string{"refresh", "--json"}, 1,
+			noProfilesErr},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			f := &fakeLauncher{runner: &claudecli.FakeRunner{}}
+
+			code, stdout, stderr := runCapture(t, f, tc.args...)
+			if code != tc.code || stderr != tc.want || stdout != "" {
+				t.Fatalf("code = %d, stdout = %q, stderr = %q; want %d, empty, %q",
+					code, stdout, stderr, tc.code, tc.want)
+			}
+			if len(f.runner.Calls) != 0 || len(f.tuiCalls) != 0 {
+				t.Fatal("a rejected command ran claude or started the TUI")
+			}
+		})
 	}
 }

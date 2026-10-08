@@ -13,7 +13,7 @@ import (
 func withMarketplace(data claudecli.PluginData, name, hash, date string) claudecli.PluginData {
 	data.Marketplaces = append(data.Marketplaces, claudecli.Marketplace{
 		Name: name, Source: "github", Repo: "owner/" + name,
-		CommitHash: hash, CommitDate: date,
+		HeadSHA: hash, CommitDate: date,
 	})
 	return data
 }

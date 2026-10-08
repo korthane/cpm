@@ -1,52 +1,116 @@
 // Command cpm is a terminal UI for comparing and managing Claude Code
-// configuration (plugins, MCP servers) across multiple profiles.
+// configuration (plugins, MCP servers) across multiple profiles, with
+// non-interactive commands (outdated, refresh) for scripts and agents.
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/korthane/cpm/internal/claudecli"
+	"github.com/korthane/cpm/internal/cli"
 	"github.com/korthane/cpm/internal/config"
 	"github.com/korthane/cpm/internal/ui"
 )
 
 const usage = `usage: cpm [<profile-dir> ...]
+       cpm outdated [--refresh] [--changelog] [--text|--json] [<profile-dir> ...]
+       cpm refresh [--text|--json] [<profile-dir> ...]
+       cpm -h | --help | <command> --help
 
-With no arguments, profiles come from ~/.config/cpm/config.yaml or are
-auto-discovered as ~/.claude* directories.`
+With no command, cpm starts the terminal UI. Commands print a result and
+exit:
+
+  outdated   list installed plugins with a newer catalog version
+             (--refresh runs 'claude plugin marketplace update' first;
+             --changelog adds CHANGELOG.md entries since the oldest install)
+  refresh    run 'claude plugin marketplace update' in every profile
+
+  --text     human-readable output (default)
+  --json     machine-readable output
+
+Command exit codes: 0 success (outdated plugins found is still success);
+1 a profile failed or could not be resolved, or output could not be
+written; 2 a malformed command line after the command name.
+` + cli.ProfilesNote
 
 func main() {
-	args := os.Args[1:]
-	for _, arg := range args {
-		if arg == "-h" || arg == "--help" {
-			fmt.Println(usage)
-			return
-		}
+	l := launcher{runner: claudecli.NewRunner(), startTUI: startTUI}
+	os.Exit(l.run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// launcher routes a command line to a CLI command or the TUI; its
+// dependencies are fields so routing is testable without a TTY.
+type launcher struct {
+	runner   claudecli.Runner
+	startTUI func(claudecli.Runner, []config.Profile) error
+}
+
+func startTUI(r claudecli.Runner, profiles []config.Profile) error {
+	_, err := tea.NewProgram(ui.New(r, profiles), tea.WithAltScreen()).Run()
+	return err
+}
+
+// run dispatches args and returns the process exit code.
+func (l launcher) run(args []string, stdout, stderr io.Writer) int {
+	// Commands go first so `cpm outdated --help` reaches the command usage.
+	if len(args) > 0 && cli.IsCommand(args[0]) {
+		return l.runCommand(args, stdout, stderr)
+	}
+	if slices.ContainsFunc(args, cli.IsHelpFlag) {
+		_, err := fmt.Fprintln(stdout, usage)
+		return cli.ExitCode(false, err, stderr)
 	}
 
 	profiles, err := resolveProfiles(args)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "cpm:", err)
-		os.Exit(1)
+		_, _ = fmt.Fprintln(stderr, "cpm:", err)
+		return cli.ExitFailure
 	}
+	if err := l.startTUI(l.runner, profiles); err != nil {
+		_, _ = fmt.Fprintln(stderr, "cpm:", err)
+		return cli.ExitFailure
+	}
+	return cli.ExitOK
+}
 
-	m := ui.New(claudecli.NewRunner(), profiles)
-	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "cpm:", err)
-		os.Exit(1)
+// runCommand runs a non-interactive command. Usage and profile-resolution
+// errors precede cli.Run, so they are plain stderr text even under --json.
+func (l launcher) runCommand(args []string, stdout, stderr io.Writer) int {
+	opts, err := cli.ParseArgs(args)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "cpm:", err)
+		return cli.ExitUsage
 	}
+	var profiles []config.Profile
+	if !opts.Help {
+		profiles, err = resolveProfiles(opts.Dirs)
+		if err != nil {
+			_, _ = fmt.Fprintln(stderr, "cpm:", err)
+			return cli.ExitFailure
+		}
+	}
+	// Cancelling on a signal lets the runner kill each claude process group.
+	ctx, stop := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return cli.Run(ctx, l.runner, profiles, opts, stdout, stderr)
 }
 
 // resolveProfiles applies the discovery precedence (CLI args > config file >
 // auto-discover) and fails when no profile can be found.
 func resolveProfiles(cliArgs []string) ([]config.Profile, error) {
-	// cpm takes no flags; a dashed argument is a typo, not a profile dir.
+	// Profile dirs never start with "-"; a dashed argument is a flag typo.
 	for _, arg := range cliArgs {
 		if strings.HasPrefix(arg, "-") {
 			return nil, fmt.Errorf("unknown flag %q", arg)

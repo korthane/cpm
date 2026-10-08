@@ -156,6 +156,7 @@ func TestBuildPluginMatrixLatestVersionAndOutdated(t *testing.T) {
 		{"non-numeric segments compared lexically", "1.2.x", "1.2.y", true},
 		{"fully non-numeric never outdated when equal", "beta", "beta", false},
 		{"fully non-numeric compared lexically", "alpha", "beta", true},
+		{"commit-hash installed version is unknown", "0a1b2c3d", "1.2.0", false},
 	}
 
 	for _, tt := range tests {
@@ -302,5 +303,338 @@ func TestMergeLatestVersionsStaleWhenAnyProfileStale(t *testing.T) {
 
 	if _, stale := MergeLatestVersions(perProfile); !stale {
 		t.Error("stale = false, want true when one profile's refresh failed")
+	}
+}
+
+func TestIsOutdated(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		installed, latest string
+		want              bool
+	}{
+		{"0.34.0", "0.35.1", true},
+		{"0.35.1", "0.35.1", false},
+		{"1.5.5", "v1.5.6", true},
+		{"", "1.0.0", false},
+		{"1.0.0", "", false},
+		// Commit-hash installs have no order against a release version.
+		{"0a1b2c3d4e5f", "1.2.0", false},
+		{"1a2b3c", "1.2.0", false},
+		{"9f8e7d6c5b4a", "10.0.0", false},
+		{"1.0.0", "abc1234", false},
+		{"alpha", "beta", true},
+	}
+	for _, tt := range tests {
+		if got := IsOutdated(tt.installed, tt.latest); got != tt.want {
+			t.Errorf("IsOutdated(%q, %q) = %v, want %v",
+				tt.installed, tt.latest, got, tt.want)
+		}
+	}
+}
+
+func TestComparePluginIDsOrdersByMarketplaceThenName(t *testing.T) {
+	t.Parallel()
+	ids := []claudecli.PluginID{
+		{Name: "b", Marketplace: "z"},
+		{Name: "c", Marketplace: "a"},
+		{Name: "a", Marketplace: "z"},
+	}
+	slices.SortFunc(ids, ComparePluginIDs)
+	want := []claudecli.PluginID{
+		{Name: "c", Marketplace: "a"},
+		{Name: "a", Marketplace: "z"},
+		{Name: "b", Marketplace: "z"},
+	}
+	if !slices.Equal(ids, want) {
+		t.Errorf("sorted = %v, want %v", ids, want)
+	}
+}
+
+func TestMergeLatestVersionsIgnoresCommitHashes(t *testing.T) {
+	// A hash sorts lexically above any release, so letting it in would
+	// displace a real version and mask the upgrade behind it.
+	perProfile := []claudecli.LatestVersions{
+		{Versions: map[claudecli.PluginID]string{
+			id("p", "m"): "1.2.0", id("h", "m"): "abc1234",
+		}},
+		{Versions: map[claudecli.PluginID]string{id("p", "m"): "abc1234"}},
+	}
+
+	for range 2 {
+		got, _ := MergeLatestVersions(perProfile)
+		if got[id("p", "m")] != "1.2.0" {
+			t.Errorf("latest = %q, want 1.2.0", got[id("p", "m")])
+		}
+		if v, ok := got[id("h", "m")]; ok {
+			t.Errorf("hash-only latest = %q, want no entry", v)
+		}
+		slices.Reverse(perProfile)
+	}
+
+	merged, _ := MergeLatestVersions(perProfile)
+	installed := []claudecli.InstalledPlugin{
+		{ID: id("p", "m"), Version: "1.0.0", Enabled: true, Scope: "user"},
+	}
+	rows := BuildPluginMatrix(
+		[]claudecli.PluginData{{Installed: installed}}, merged)
+	if !rows[0].Cells[0].Outdated || rows[0].LatestVersion != "1.2.0" {
+		t.Errorf("row = %+v, want outdated against 1.2.0", rows[0])
+	}
+}
+
+func TestBuildPluginMatrixCarriesCommitSHA(t *testing.T) {
+	perProfile := []claudecli.PluginData{
+		{Installed: []claudecli.InstalledPlugin{
+			{ID: id("p", "m"), Version: "1.0.0", Enabled: true,
+				Scope: "user", CommitSHA: "aaa111"},
+		}},
+		{}, // profile without the plugin
+	}
+
+	rows := BuildPluginMatrix(perProfile, nil)
+
+	if got := rows[0].Cells[0].CommitSHA; got != "aaa111" {
+		t.Errorf("CommitSHA = %q, want aaa111", got)
+	}
+	if got := rows[0].Cells[1].CommitSHA; got != "" {
+		t.Errorf("absent cell CommitSHA = %q, want empty", got)
+	}
+}
+
+func TestBuildPluginMatrixCommitSHAFollowsCellScope(t *testing.T) {
+	// The user-scope install wins the cell, so its SHA must too.
+	perProfile := []claudecli.PluginData{
+		{Installed: []claudecli.InstalledPlugin{
+			{ID: id("p", "m"), Version: "1.0.0", Enabled: true,
+				Scope: "user", CommitSHA: "user-sha"},
+			{ID: id("p", "m"), Version: "2.0.0", Enabled: true,
+				Scope: "project", CommitSHA: "project-sha"},
+		}},
+	}
+
+	cell := BuildPluginMatrix(perProfile, nil)[0].Cells[0]
+
+	if cell.Version != "1.0.0" || cell.CommitSHA != "user-sha" {
+		t.Errorf("cell = %+v, want user install's version and SHA", cell)
+	}
+}
+
+func TestLatestSource(t *testing.T) {
+	p := id("p", "m")
+	src := func(commit string) claudecli.PluginSource {
+		return claudecli.PluginSource{RepoURL: "owner/repo", Commit: commit}
+	}
+	lv := func(version, commit string, stale bool) claudecli.LatestVersions {
+		return claudecli.LatestVersions{
+			Versions: map[claudecli.PluginID]string{p: version},
+			Sources:  map[claudecli.PluginID]claudecli.PluginSource{p: src(commit)},
+			Stale:    stale,
+		}
+	}
+	withRepo := func(l claudecli.LatestVersions,
+		repo string) claudecli.LatestVersions {
+		s := l.Sources[p]
+		s.RepoURL = repo
+		l.Sources = map[claudecli.PluginID]claudecli.PluginSource{p: s}
+		return l
+	}
+	// incomplete is a relative source whose git lookup failed: it has a
+	// clone to read but no repo or commit for links.
+	incomplete := func(stale bool) claudecli.LatestVersions {
+		return claudecli.LatestVersions{
+			Versions: map[claudecli.PluginID]string{p: "2.0.0"},
+			Sources: map[claudecli.PluginID]claudecli.PluginSource{
+				p: {Path: "plugins/p", CloneDir: "/clone"}},
+			Stale: stale,
+		}
+	}
+
+	tests := []struct {
+		name       string
+		perProfile []claudecli.LatestVersions
+		latest     string
+		want       string
+		wantOK     bool
+	}{
+		{
+			name: "source of the profile with the latest version",
+			perProfile: []claudecli.LatestVersions{
+				lv("1.0.0", "old", false), lv("2.0.0", "new", false),
+			},
+			latest: "2.0.0", want: "new", wantOK: true,
+		},
+		{
+			name: "equal under version compare, not string equality",
+			perProfile: []claudecli.LatestVersions{
+				lv("v2.0", "new", false),
+			},
+			latest: "2.0.0", want: "new", wantOK: true,
+		},
+		{
+			name: "tie prefers a non-stale profile",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", "stale", true), lv("2.0.0", "fresh", false),
+			},
+			latest: "2.0.0", want: "fresh", wantOK: true,
+		},
+		{
+			name: "tie among non-stale prefers profile order",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", "first", false), lv("2.0.0", "second", false),
+			},
+			latest: "2.0.0", want: "first", wantOK: true,
+		},
+		{
+			name: "only stale profiles still yield a source",
+			perProfile: []claudecli.LatestVersions{
+				lv("1.0.0", "old", false), lv("2.0.0", "stale", true),
+			},
+			latest: "2.0.0", want: "stale", wantOK: true,
+		},
+		{
+			name: "tie prefers a source that can build links",
+			perProfile: []claudecli.LatestVersions{
+				incomplete(false), lv("2.0.0", "second", false),
+			},
+			latest: "2.0.0", want: "second", wantOK: true,
+		},
+		{
+			name: "linkable stale source beats a fresh one without links",
+			perProfile: []claudecli.LatestVersions{
+				incomplete(false), lv("2.0.0", "stale", true),
+			},
+			latest: "2.0.0", want: "stale", wantOK: true,
+		},
+		{
+			name: "tie skips a source whose repo is not on GitHub",
+			perProfile: []claudecli.LatestVersions{
+				withRepo(lv("2.0.0", "gitlab", false), "https://gitlab.com/o/r"),
+				lv("2.0.0", "github", true),
+			},
+			latest: "2.0.0", want: "github", wantOK: true,
+		},
+		{
+			name: "tie skips a source whose commit cannot be linked",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", "a..b", false), lv("2.0.0", "valid", true),
+			},
+			latest: "2.0.0", want: "valid", wantOK: true,
+		},
+		{
+			name: "source without links still beats none",
+			perProfile: []claudecli.LatestVersions{
+				incomplete(false),
+			},
+			latest: "2.0.0", want: "", wantOK: true,
+		},
+		{
+			name: "profile without a source is skipped",
+			perProfile: []claudecli.LatestVersions{
+				{Versions: map[claudecli.PluginID]string{p: "2.0.0"}},
+				lv("2.0.0", "second", false),
+			},
+			latest: "2.0.0", want: "second", wantOK: true,
+		},
+		{
+			name: "no profile has the latest version",
+			perProfile: []claudecli.LatestVersions{
+				lv("1.0.0", "old", false),
+			},
+			latest: "2.0.0",
+		},
+		{
+			name: "matching version without a source",
+			perProfile: []claudecli.LatestVersions{{
+				Versions: map[claudecli.PluginID]string{p: "2.0.0"},
+			}},
+			latest: "2.0.0",
+		},
+		{
+			name: "empty latest",
+			perProfile: []claudecli.LatestVersions{
+				lv("", "x", false),
+			},
+			latest: "",
+		},
+		{
+			name:   "no profiles",
+			latest: "2.0.0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := LatestSource(tt.perProfile, p, tt.latest)
+			if ok != tt.wantOK || got.Commit != tt.want {
+				t.Errorf("LatestSource = (%q, %v), want (%q, %v)",
+					got.Commit, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestChangelogSource(t *testing.T) {
+	p := id("p", "m")
+	lv := func(version string, src claudecli.PluginSource,
+		stale bool) claudecli.LatestVersions {
+		return claudecli.LatestVersions{
+			Versions: map[claudecli.PluginID]string{p: version},
+			Sources:  map[claudecli.PluginID]claudecli.PluginSource{p: src},
+			Stale:    stale,
+		}
+	}
+	remote := claudecli.PluginSource{RepoURL: "owner/repo", Commit: "remote"}
+	clone := func(dir string) claudecli.PluginSource {
+		return claudecli.PluginSource{Path: "plugins/p", CloneDir: dir}
+	}
+
+	tests := []struct {
+		name       string
+		perProfile []claudecli.LatestVersions
+		latest     string
+		want       claudecli.PluginSource
+		wantOK     bool
+	}{
+		{
+			name: "local clone beats an earlier linkable remote",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", remote, false), lv("2.0.0", clone("/c"), false),
+			},
+			latest: "2.0.0", want: clone("/c"), wantOK: true,
+		},
+		{
+			name: "stale local clone still beats a fresh remote",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", remote, false), lv("2.0.0", clone("/c"), true),
+			},
+			latest: "2.0.0", want: clone("/c"), wantOK: true,
+		},
+		{
+			name: "tie among clones prefers a non-stale profile",
+			perProfile: []claudecli.LatestVersions{
+				lv("2.0.0", clone("/stale"), true),
+				lv("2.0.0", clone("/fresh"), false),
+			},
+			latest: "2.0.0", want: clone("/fresh"), wantOK: true,
+		},
+		{
+			name: "clone of an older version is skipped",
+			perProfile: []claudecli.LatestVersions{
+				lv("1.0.0", clone("/old"), false), lv("2.0.0", remote, false),
+			},
+			latest: "2.0.0", want: remote, wantOK: true,
+		},
+		{
+			name:   "empty latest",
+			latest: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ChangelogSource(tt.perProfile, p, tt.latest)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("ChangelogSource = (%+v, %v), want (%+v, %v)",
+					got, ok, tt.want, tt.wantOK)
+			}
+		})
 	}
 }

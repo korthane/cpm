@@ -1,17 +1,17 @@
 {
-  "name": "ralphex",
+  "name": "widget",
   "owner": {
-    "name": "umputun",
-    "email": "umputun@gmail.com"
+    "name": "acme",
+    "email": "dev@example.com"
   },
   "plugins": [
     {
-      "name": "ralphex",
+      "name": "widget",
       "source": "./",
-      "description": "Autonomous plan execution with Claude Code - task execution, monitoring, and plan creation",
+      "description": "Example plugin served from the marketplace root",
       "version": "0.17.0",
       "author": {
-        "name": "umputun"
+        "name": "acme"
       }
     },
     {
